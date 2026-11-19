@@ -1,20 +1,11 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Waybook PWA name patch — 台湾2026
 
-# Run and deploy your AI Studio app
+Changes only the installed PWA name and website/browser title.
 
-This contains everything you need to run your app locally.
+1. Copy `vite.config.ts` and `index.html` to the root of your existing `waybook` GitHub repository, replacing matching files.
+2. In GitHub Desktop, commit (`Name PWA 台湾2026`) and **Push origin**.
+3. Confirm GitHub Actions deployment succeeds.
+4. On phone, remove the old installed Waybook shortcut/app and reinstall if the old name persists. Before doing so, ensure unpublished local edits are backed up or published; reinstalling can affect local data.
 
-View your app in AI Studio: https://ai.studio/apps/9d8a8b86-6e07-45d5-9e91-7aae8edf5558
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+This patch does not include any icon images. Apply the Style C postcard icon patch separately if you have not already done so.
+No change to Google Drive backend, OAuth, photo gallery, itinerary, sounds or sync.

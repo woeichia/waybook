@@ -16,8 +16,8 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
           id: process.env.VITE_BASE_PATH || '/',
-          name: 'Waybook — Travel Itinerary',
-          short_name: 'Waybook',
+          name: '台湾2026',
+          short_name: '台湾2026',
           description: 'Minimalist mobile-first travel itinerary companion with day-by-day schedules, Google Maps routing, offline PWA support, and AI trip import.',
           theme_color: '#EDEBE6',
           background_color: '#EDEBE6',
@@ -26,19 +26,19 @@ export default defineConfig(() => {
           scope: process.env.VITE_BASE_PATH || '/',
           icons: [
             {
-              src: 'pwa-192x192.png',
+              src: '/pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-512x512.png',
+              src: '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'pwa-maskable-512x512.png',
+              src: '/pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
