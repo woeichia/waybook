@@ -32,10 +32,18 @@ export function cloudRead<T>(params: Record<string, string>, timeout = 20000): P
   });
 }
 
+/**
+ * A write is accepted only after the backend confirms the requestId. Google
+ * Apps Script can nest HtmlService inside an additional iframe, so the ordinary
+ * postMessage is an optimisation, not the sole confirmation mechanism.
+ * The fallback queries a short-lived, unguessable receipt via read-only JSONP.
+ * Never include the Google ID token in the receipt request or a URL.
+ */
 export function cloudWrite<T>(action: string, data: unknown, idToken: string): Promise<T> {
   if (!CLOUD_URL) return Promise.reject(new Error('尚未設定 Apps Script URL'));
+  if (!globalThis.crypto?.randomUUID) return Promise.reject(new Error('瀏覽器不支援安全請求識別碼'));
   return new Promise((resolve, reject) => {
-    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const requestId = crypto.randomUUID();
     const frame = document.createElement('iframe');
     const form = document.createElement('form');
     frame.name = `waybook_upload_${requestId}`;
@@ -43,22 +51,60 @@ export function cloudWrite<T>(action: string, data: unknown, idToken: string): P
     form.method = 'POST'; form.action = CLOUD_URL; form.target = frame.name;
     const field = document.createElement('input'); field.type = 'hidden'; field.name = 'payload';
     field.value = JSON.stringify({ requestId, action, idToken, data }); form.appendChild(field);
-    const timer = window.setTimeout(() => done(new Error('雲端寫入逾時，請查看雲端版本後再重試')), 60000);
+
+    let settled = false;
+    let polling = false;
+    let pollTimer: number | undefined;
+    const timer = window.setTimeout(() => {
+      finish(new Error('雲端尚未確認寫入結果。請先檢查 Google Drive，勿立即重複上傳。'));
+    }, 90000);
+
+    function finish(error?: Error, response?: T) {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+      window.removeEventListener('message', onMessage);
+      window.setTimeout(() => { frame.remove(); form.remove(); }, 100);
+      if (error) reject(error); else resolve(response as T);
+    }
+
     const onMessage = (event: MessageEvent) => {
       if (!/^https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|google\.com)$/i.test(event.origin)) return;
       const msg = event.data;
       if (!msg || msg.type !== 'WAYBOOK_WRITE_RESULT' || msg.requestId !== requestId) return;
-      if (!msg.ok) done(new Error(msg.error || '雲端寫入失敗'));
-      else done(undefined, msg.data as T);
+      if (!msg.ok) finish(new Error(msg.error || '雲端寫入失敗'));
+      else finish(undefined, msg.data as T);
     };
-    function done(error?: Error, response?: T) {
-      window.clearTimeout(timer); window.removeEventListener('message', onMessage);
-      window.setTimeout(() => { frame.remove(); form.remove(); }, 100);
-      if (error) reject(error); else resolve(response as T);
+
+    async function checkReceipt() {
+      if (settled || polling) return;
+      polling = true;
+      try {
+        const receipt = await cloudRead<{ state: 'pending' | 'complete'; ok?: boolean; data?: T; error?: string }>(
+          { action: 'writeReceipt', requestId }, 10000,
+        );
+        if (receipt?.state === 'complete') {
+          if (receipt.ok) finish(undefined, receipt.data);
+          else finish(new Error(receipt.error || '雲端寫入失敗'));
+        }
+      } catch {
+        // Transient failure: leave the POST running; a subsequent poll can recover.
+      } finally {
+        polling = false;
+        if (!settled) pollTimer = window.setTimeout(checkReceipt, 2500);
+      }
     }
+
     window.addEventListener('message', onMessage);
     document.body.appendChild(frame); document.body.appendChild(form);
-    form.submit();
+    try {
+      form.submit();
+      // Allow the Apps Script invocation to begin before asking for its receipt.
+      pollTimer = window.setTimeout(checkReceipt, 2000);
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error('無法送出雲端寫入請求'));
+    }
   });
 }
 
