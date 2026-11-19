@@ -1,11 +1,7 @@
-# Waybook PWA name patch — 台湾2026
+# 台湾2026 PWA installability fix
 
-Changes only the installed PWA name and website/browser title.
+Replace only `vite.config.ts` in the root of the GitHub waybook repository. This changes PWA manifest icon URLs from domain-root paths (`/pwa-...`) to manifest-relative paths (`pwa-...`). On GitHub Pages these resolve to `/waybook/pwa-...`.
 
-1. Copy `vite.config.ts` and `index.html` to the root of your existing `waybook` GitHub repository, replacing matching files.
-2. In GitHub Desktop, commit (`Name PWA 台湾2026`) and **Push origin**.
-3. Confirm GitHub Actions deployment succeeds.
-4. On phone, remove the old installed Waybook shortcut/app and reinstall if the old name persists. Before doing so, ensure unpublished local edits are backed up or published; reinstalling can affect local data.
+Preserves app name 台湾2026, base path, all other PWA settings, and all application features.
 
-This patch does not include any icon images. Apply the Style C postcard icon patch separately if you have not already done so.
-No change to Google Drive backend, OAuth, photo gallery, itinerary, sounds or sync.
+Commit and push in GitHub Desktop; verify Actions deployment. In normal Chrome (not Incognito) check `https://woeichia.github.io/waybook/manifest.webmanifest`, which should have icon URLs relative to `/waybook/`. If previously installed, uninstall first only after checking your unpublished local edits.
