@@ -106,7 +106,7 @@ export default function App() {
   const lastBackgroundCheckRef = React.useRef(0);
 
   const isOnline = useOnlineStatus();
-  const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline);
+  const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline, itinerary.days[selectedDayIndex]?.date);
 
   useEffect(() => {
     saveItineraryToStorage(itinerary);
