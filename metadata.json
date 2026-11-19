@@ -1,0 +1,6 @@
+{
+  "name": "Waybook",
+  "description": "Minimalist mobile-first travel itinerary companion with day-by-day schedules, Google Maps routing, offline PWA support, and AI trip import.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

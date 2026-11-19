@@ -1,0 +1,515 @@
+{
+  "trip": {
+    "title": "台灣親子旅行 2026 · 台北 × 台中 × 清境 × 十分 × 九份",
+    "startDate": "2026-12-05",
+    "endDate": "2026-12-13",
+    "travelers": 3,
+    "coverImage": "/images/taiwan_cover_banner_1794968908240.jpg",
+    "currency": "TWD"
+  },
+  "days": [
+    {
+      "dayNumber": 1,
+      "date": "2026-12-05",
+      "title": "抵達台北 · 輕鬆休息",
+      "stops": [
+        {
+          "time": "19:30",
+          "title": "抵達桃園國際機場",
+          "category": "Transport",
+          "description": "入境、取行李。抵達日不安排正式觀光活動。",
+          "locationName": "桃園國際機場",
+          "mapQuery": "Taiwan Taoyuan International Airport",
+          "image": "/images/tw_taoyuan_hsr_1794968908637.jpg",
+          "transitToNext": "搭乘預先安排的機場交通前往台北飯店",
+          "id": "tw-pdf-day1-stop1"
+        },
+        {
+          "time": "約22:00",
+          "title": "抵達台北飯店",
+          "category": "Hotel",
+          "description": "辦理入住並休息。如飯店同意，12/06 退房後寄存大行李，12/08 回來續住同一間飯店。",
+          "locationName": "台北飯店（名稱待確認）",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day1-stop2"
+        }
+      ]
+    },
+    {
+      "dayNumber": 2,
+      "date": "2026-12-06",
+      "title": "包車 Day 1 · 台中城市＋海邊夕陽",
+      "stops": [
+        {
+          "time": "09:00",
+          "title": "台北飯店出發",
+          "category": "Transport",
+          "description": "包車第一天；約 10 小時，原則上約 19:00 前結束。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "包車前往台中",
+          "id": "tw-pdf-day2-stop1"
+        },
+        {
+          "time": "11:30–12:30",
+          "title": "抵達台中・午餐",
+          "category": "Food",
+          "description": "到台中後吃午餐；餐廳尚未指定。",
+          "locationName": "台中市",
+          "mapQuery": "Taichung City",
+          "image": "/images/tw_yongkang_food_1794968914096.jpg",
+          "transitToNext": "前往台中國家歌劇院",
+          "id": "tw-pdf-day2-stop2"
+        },
+        {
+          "time": "12:45–14:00",
+          "title": "台中國家歌劇院",
+          "category": "Sightseeing",
+          "description": "參觀國家歌劇院。",
+          "locationName": "臺中國家歌劇院",
+          "mapQuery": "National Taichung Theater",
+          "image": "/images/tw_taichung_theater_1794968909794.jpg",
+          "transitToNext": "包車前往高美濕地",
+          "id": "tw-pdf-day2-stop3"
+        },
+        {
+          "time": "15:00–17:00",
+          "title": "高美濕地",
+          "category": "Sightseeing",
+          "description": "海岸、木棧道及夕陽。出發前確認潮汐與木棧道開放時間。",
+          "locationName": "高美濕地",
+          "mapQuery": "Gaomei Wetlands Taichung",
+          "image": "/images/tw_gaomei_wetlands_1794968909638.jpg",
+          "transitToNext": "包車前往逢甲飯店",
+          "id": "tw-pdf-day2-stop4"
+        },
+        {
+          "time": "18:00",
+          "title": "逢甲飯店入住",
+          "category": "Hotel",
+          "description": "逢甲住宿第一晚；飯店名稱待確認。",
+          "locationName": "逢甲住宿區",
+          "mapQuery": "Fengjia Night Market Taichung",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "前往逢甲夜市",
+          "id": "tw-pdf-day2-stop5"
+        },
+        {
+          "time": "18:30以後",
+          "title": "逢甲夜市",
+          "category": "Food",
+          "description": "晚餐及逛街。",
+          "locationName": "逢甲夜市",
+          "mapQuery": "Fengjia Night Market Taichung",
+          "image": "/images/tw_fengjia_nightmarket_1794968908802.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day2-stop6"
+        }
+      ]
+    },
+    {
+      "dayNumber": 3,
+      "date": "2026-12-07",
+      "title": "包車 Day 2 · 清境＋屋馬",
+      "stops": [
+        {
+          "time": "09:00",
+          "title": "逢甲飯店出發",
+          "category": "Transport",
+          "description": "包車第二天，前往清境；此日已取消日月潭，避免趕場。",
+          "locationName": "逢甲飯店",
+          "mapQuery": "Fengjia Taichung",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "包車前往清境",
+          "id": "tw-pdf-day3-stop1"
+        },
+        {
+          "time": "10:45–14:00",
+          "title": "清境農場",
+          "category": "Sightseeing",
+          "description": "青青草原、綿羊、天空步道及午餐。",
+          "locationName": "清境農場",
+          "mapQuery": "Cingjing Farm Nantou",
+          "image": "/images/tw_cingjing_farm_1794968910360.jpg",
+          "transitToNext": "前往埔里，若疲累可取消下一站",
+          "id": "tw-pdf-day3-stop2"
+        },
+        {
+          "time": "15:15–16:15",
+          "title": "埔里短停 · 18度C巧克力（可取消）",
+          "category": "Food",
+          "description": "建議 18度C 巧克力；如累了可直接取消此站。",
+          "locationName": "埔里 18度C 巧克力工房",
+          "mapQuery": "Feeling18 Chocolate Puli",
+          "image": "/images/tw_puli_chocolate_1794968910549.jpg",
+          "transitToNext": "包車回台中／逢甲",
+          "id": "tw-pdf-day3-stop3"
+        },
+        {
+          "time": "17:30–18:00",
+          "title": "返回逢甲飯店休息",
+          "category": "Hotel",
+          "description": "回台中／逢甲酒店休息；續住第二晚。",
+          "locationName": "逢甲住宿區",
+          "mapQuery": "Fengjia Taichung Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "前往屋馬燒肉",
+          "id": "tw-pdf-day3-stop4"
+        },
+        {
+          "time": "19:00 / 19:30",
+          "title": "屋馬燒肉晚餐",
+          "category": "Food",
+          "description": "建議提前訂位。PDF 列出 19:00 或 19:30，尚未指定已確認時段與分店。",
+          "locationName": "屋馬燒肉（分店待確認）",
+          "mapQuery": "Umai Yakiniku Taichung",
+          "image": "/images/tw_yakiniku_dinner_1794968911697.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day3-stop5"
+        }
+      ]
+    },
+    {
+      "dayNumber": 4,
+      "date": "2026-12-08",
+      "title": "包車 Day 3 · 十分＋九份＋回台北",
+      "stops": [
+        {
+          "time": "09:00",
+          "title": "逢甲退房出發",
+          "category": "Transport",
+          "description": "行李直接放包車上，開往十分。",
+          "locationName": "逢甲飯店",
+          "mapQuery": "Fengjia Taichung",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "包車前往十分瀑布",
+          "id": "tw-pdf-day4-stop1"
+        },
+        {
+          "time": "11:30–12:15",
+          "title": "十分瀑布",
+          "category": "Sightseeing",
+          "description": "觀賞十分瀑布。",
+          "locationName": "十分瀑布",
+          "mapQuery": "Shifen Waterfall New Taipei",
+          "image": "/images/tw_shifen_lanterns_1794968911660.jpg",
+          "transitToNext": "前往十分老街",
+          "id": "tw-pdf-day4-stop2"
+        },
+        {
+          "time": "12:25–13:40",
+          "title": "十分老街",
+          "category": "Sightseeing",
+          "description": "放天燈、看火車及午餐。",
+          "locationName": "十分老街",
+          "mapQuery": "Shifen Old Street New Taipei",
+          "image": "/images/tw_shifen_lanterns_1794968911660.jpg",
+          "transitToNext": "包車前往九份",
+          "id": "tw-pdf-day4-stop3"
+        },
+        {
+          "time": "14:45–17:30",
+          "title": "九份老街",
+          "category": "Sightseeing",
+          "description": "老街、芋圓、茶樓及傍晚燈籠。",
+          "locationName": "九份老街",
+          "mapQuery": "Jiufen Old Street New Taipei",
+          "image": "/images/tw_jiufen_oldstreet_1794968911582.jpg",
+          "transitToNext": "包車回台北飯店",
+          "id": "tw-pdf-day4-stop4"
+        },
+        {
+          "time": "18:30–19:00",
+          "title": "抵達台北飯店",
+          "category": "Hotel",
+          "description": "回到台北住宿；當天不再加黃金瀑布、陰陽海或基隆。",
+          "locationName": "台北飯店（名稱待確認）",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day4-stop5"
+        }
+      ]
+    },
+    {
+      "dayNumber": 5,
+      "date": "2026-12-09",
+      "title": "動物園＋貓空＋夫妻約會",
+      "stops": [
+        {
+          "time": "09:00",
+          "title": "台北飯店出發",
+          "category": "Transport",
+          "description": "搭乘 MRT／纜車行程。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "前往台北市立動物園",
+          "id": "tw-pdf-day5-stop1"
+        },
+        {
+          "time": "09:30–13:00",
+          "title": "台北動物園",
+          "category": "Sightseeing",
+          "description": "親子參觀台北動物園。",
+          "locationName": "台北市立動物園",
+          "mapQuery": "Taipei Zoo",
+          "image": "/images/tw_taipei_zoo_1794968913482.jpg",
+          "transitToNext": "午餐",
+          "id": "tw-pdf-day5-stop2"
+        },
+        {
+          "time": "13:00–14:00",
+          "title": "午餐",
+          "category": "Food",
+          "description": "動物園／貓空附近用餐，餐廳尚未指定。",
+          "locationName": "台北動物園周邊",
+          "mapQuery": "Taipei Zoo restaurants",
+          "image": "/images/tw_yongkang_food_1794968914096.jpg",
+          "transitToNext": "前往貓空纜車",
+          "id": "tw-pdf-day5-stop3"
+        },
+        {
+          "time": "14:00–15:45",
+          "title": "貓空纜車＋山上散步",
+          "category": "Sightseeing",
+          "description": "搭乘貓空纜車，山上輕鬆走走。",
+          "locationName": "貓空纜車",
+          "mapQuery": "Maokong Gondola Taipei",
+          "image": "/images/tw_maokong_gondola_1794968912942.jpg",
+          "transitToNext": "返回台北飯店",
+          "id": "tw-pdf-day5-stop4"
+        },
+        {
+          "time": "16:00–17:00",
+          "title": "回飯店休息・換衣服",
+          "category": "Hotel",
+          "description": "小孩由家人照顧，夫妻準備晚餐約會。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "前往香色 Xiang Se",
+          "id": "tw-pdf-day5-stop5"
+        },
+        {
+          "time": "18:00–約21:00",
+          "title": "香色 Xiang Se 夫妻晚餐 ♡",
+          "category": "Food",
+          "description": "夫妻約會晚餐。出發前確認訂位。",
+          "locationName": "香色 Xiang Se",
+          "mapQuery": "Xiang Se Taipei restaurant",
+          "image": "/images/tw_xiangse_dining_1794968913443.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day5-stop6"
+        }
+      ]
+    },
+    {
+      "dayNumber": 6,
+      "date": "2026-12-10",
+      "title": "兒童新樂園日",
+      "stops": [
+        {
+          "time": "09:30",
+          "title": "台北飯店出發",
+          "category": "Transport",
+          "description": "搭乘 MRT＋巴士。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "前往兒童新樂園",
+          "id": "tw-pdf-day6-stop1"
+        },
+        {
+          "time": "10:00–14:30",
+          "title": "台北兒童新樂園",
+          "category": "Sightseeing",
+          "description": "親子遊樂園時段。",
+          "locationName": "台北市立兒童新樂園",
+          "mapQuery": "Taipei Childrens Amusement Park",
+          "image": "/images/tw_children_park_1794968913260.jpg",
+          "transitToNext": "視體力前往科教館或天文館",
+          "id": "tw-pdf-day6-stop2"
+        },
+        {
+          "time": "15:00以後",
+          "title": "科教館／天文館（二選一，可取消）",
+          "category": "Sightseeing",
+          "description": "科教館或天文館二選一；累了可取消並直接休息。",
+          "locationName": "國立臺灣科學教育館／臺北市立天文科學教育館",
+          "mapQuery": "National Taiwan Science Education Center Taipei",
+          "image": "/images/tw_children_park_1794968913260.jpg",
+          "transitToNext": "返回飯店或自由晚餐",
+          "id": "tw-pdf-day6-stop3"
+        },
+        {
+          "time": "晚上",
+          "title": "自由晚餐・輕鬆休息",
+          "category": "Food",
+          "description": "未指定晚餐餐廳。",
+          "locationName": "台北市",
+          "mapQuery": "Taipei City",
+          "image": "/images/tw_yongkang_food_1794968914096.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day6-stop4"
+        }
+      ]
+    },
+    {
+      "dayNumber": 7,
+      "date": "2026-12-11",
+      "title": "台北文化＋師大購物",
+      "stops": [
+        {
+          "time": "10:00–11:30",
+          "title": "中正紀念堂",
+          "category": "Sightseeing",
+          "description": "參觀中正紀念堂。",
+          "locationName": "中正紀念堂",
+          "mapQuery": "Chiang Kai-shek Memorial Hall Taipei",
+          "image": "/images/tw_cks_memorial_1794968913687.jpg",
+          "transitToNext": "前往永康街",
+          "id": "tw-pdf-day7-stop1"
+        },
+        {
+          "time": "11:45–13:30",
+          "title": "永康街午餐＋甜品",
+          "category": "Food",
+          "description": "午餐、甜品及街區散步。",
+          "locationName": "永康街",
+          "mapQuery": "Yongkang Street Taipei",
+          "image": "/images/tw_yongkang_food_1794968914096.jpg",
+          "transitToNext": "附近咖啡館／慢逛",
+          "id": "tw-pdf-day7-stop2"
+        },
+        {
+          "time": "14:00–15:30",
+          "title": "咖啡・附近慢逛",
+          "category": "Sightseeing",
+          "description": "給小孩安排休息時間。",
+          "locationName": "永康街周邊",
+          "mapQuery": "Yongkang Street Taipei",
+          "image": "/images/tw_yongkang_food_1794968914096.jpg",
+          "transitToNext": "前往師大商圈",
+          "id": "tw-pdf-day7-stop3"
+        },
+        {
+          "time": "16:00–21:00",
+          "title": "師大商圈購物＋晚餐",
+          "category": "Sightseeing",
+          "description": "重點看服飾、飾品、鞋包和特色小店。",
+          "locationName": "師大商圈",
+          "mapQuery": "Shida Night Market Taipei",
+          "image": "/images/tw_zhongshan_ximen_1794968914541.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day7-stop4"
+        }
+      ]
+    },
+    {
+      "dayNumber": 8,
+      "date": "2026-12-12",
+      "title": "中山＋西門町購物收尾",
+      "stops": [
+        {
+          "time": "10:30",
+          "title": "慢慢出門",
+          "category": "Transport",
+          "description": "當天不趕行程。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "搭乘 MRT 前往中山商圈",
+          "id": "tw-pdf-day8-stop1"
+        },
+        {
+          "time": "11:00–13:30",
+          "title": "中山商圈＋午餐",
+          "category": "Sightseeing",
+          "description": "中山商圈購物並午餐。",
+          "locationName": "中山商圈",
+          "mapQuery": "Zhongshan Shopping District Taipei",
+          "image": "/images/tw_zhongshan_ximen_1794968914541.jpg",
+          "transitToNext": "前往西門町",
+          "id": "tw-pdf-day8-stop2"
+        },
+        {
+          "time": "14:00–19:30",
+          "title": "西門町購物",
+          "category": "Sightseeing",
+          "description": "採買藥妝、鞋、玩具、公仔、伴手禮等。",
+          "locationName": "西門町",
+          "mapQuery": "Ximending Taipei",
+          "image": "/images/tw_taipei_souvenirs_1794968915980.jpg",
+          "transitToNext": "返回台北飯店",
+          "id": "tw-pdf-day8-stop3"
+        },
+        {
+          "time": "20:30左右",
+          "title": "回飯店整理行李",
+          "category": "Hotel",
+          "description": "整理行李、早點休息，隔天清晨出發。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day8-stop4"
+        }
+      ]
+    },
+    {
+      "dayNumber": 9,
+      "date": "2026-12-13",
+      "title": "回家啦 ♡",
+      "stops": [
+        {
+          "time": "04:30–04:45",
+          "title": "起床",
+          "category": "Hotel",
+          "description": "準備辦理退房與前往機場。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taichung_hotel_1794968909216.jpg",
+          "transitToNext": "搭乘預約車前往桃園機場",
+          "id": "tw-pdf-day9-stop1"
+        },
+        {
+          "time": "05:00",
+          "title": "預約車從台北飯店出發",
+          "category": "Transport",
+          "description": "搭乘預約機場接送。",
+          "locationName": "台北飯店",
+          "mapQuery": "Taipei City Hotel",
+          "image": "/images/tw_taoyuan_hsr_1794968908637.jpg",
+          "transitToNext": "預計約 05:45 抵達桃園機場",
+          "id": "tw-pdf-day9-stop2"
+        },
+        {
+          "time": "約05:45",
+          "title": "抵達桃園機場",
+          "category": "Transport",
+          "description": "辦理登機、託運行李及安檢。",
+          "locationName": "桃園國際機場",
+          "mapQuery": "Taiwan Taoyuan International Airport",
+          "image": "/images/tw_taoyuan_hsr_1794968908637.jpg",
+          "transitToNext": "前往登機門",
+          "id": "tw-pdf-day9-stop3"
+        },
+        {
+          "time": "08:25",
+          "title": "航班起飛回新加坡",
+          "category": "Transport",
+          "description": "一路平安 ♡",
+          "locationName": "桃園國際機場",
+          "mapQuery": "Taiwan Taoyuan International Airport",
+          "image": "/images/tw_taoyuan_hsr_1794968908637.jpg",
+          "transitToNext": "",
+          "id": "tw-pdf-day9-stop4"
+        }
+      ]
+    }
+  ]
+}
