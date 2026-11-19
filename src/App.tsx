@@ -99,6 +99,12 @@ export default function App() {
   const [adminToken, setAdminToken] = useState('');
   const isAdmin = !cloudConfigured || !!adminToken;
   const [cloudLoaded, setCloudLoaded] = useState(false);
+  // Preserve admin edits while checking for newly published family updates.
+  const unpublishedEditsRef = React.useRef(false);
+  const latestCloudVersionRef = React.useRef('');
+  const photoCacheRef = React.useRef<Record<string, string>>({});
+  const lastBackgroundCheckRef = React.useRef(0);
+
   const isOnline = useOnlineStatus();
   const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline);
 
@@ -125,7 +131,10 @@ export default function App() {
     setSelectedDayIndex(nextIndex);
   };
 
-  const pullCloud = async () => {
+  const pullCloud = async (background = false) => {
+    // Guest auto-refresh must never overwrite local, unpublished admin edits.
+    if (background && (adminToken || unpublishedEditsRef.current || isEditOpen || selectedStopRef.current || document.hidden)) return;
+
     if (!cloudConfigured || cloudBusy) return;
     setCloudBusy(true); setCloudStatus('正在取得雲端行程…');
     try {
@@ -135,19 +144,27 @@ export default function App() {
         setCloudStatus('雲端尚無行程，管理員可發佈目前台灣行程。');
         return;
       }
+      if (background && snapshot.updatedAt && snapshot.updatedAt === latestCloudVersionRef.current) {
+        setCloudLoaded(true);
+        setCloudStatus('已是最新雲端行程。');
+        return;
+      }
       const validated = validateItineraryData(snapshot.itinerary);
       if (!validated.ok) throw new Error(validated.error);
       setItinerary(validated.data);
       setCloudPhotoIds(snapshot.galleries || {});
       setCloudUpdatedAt(snapshot.updatedAt || '');
+      latestCloudVersionRef.current = snapshot.updatedAt || '';
       setCloudLoaded(true);
       setCloudStatus('已載入雲端行程，正在同步照片…');
       const allIds = Array.from(new Set(Object.values(snapshot.galleries || {}).flat()));
-      const photoMap: Record<string,string> = {};
+      const photoMap: Record<string,string> = { ...photoCacheRef.current };
       for (const id of allIds) {
+        if (photoMap[id]) continue;
         try { photoMap[id] = await loadCloudPhoto(id); }
         catch { /* Keep remaining pictures viewable even if one fails. */ }
       }
+      photoCacheRef.current = photoMap;
       setCloudPhotoData(photoMap);
       const galleries: Record<string,string[]> = {};
       for (const [stopId, ids] of Object.entries(snapshot.galleries || {})) {
@@ -159,7 +176,36 @@ export default function App() {
     finally { setCloudBusy(false); }
   };
 
-  useEffect(() => { if (cloudConfigured) { void pullCloud(); } }, []);
+  useEffect(() => { if (cloudConfigured) { lastBackgroundCheckRef.current = Date.now(); void pullCloud(); } }, []);
+
+  // Opening the PWA, returning from another app, and returning online fetch
+  // the latest published version automatically. The visible Reload button
+  // remains a manual fallback. No need to reinstall or redeploy after edits.
+  const pullCloudRef = React.useRef(pullCloud);
+  pullCloudRef.current = pullCloud;
+  useEffect(() => {
+    if (!cloudConfigured || !!adminToken || isEditOpen || !isOnline) return;
+    const check = () => {
+      if (document.hidden || unpublishedEditsRef.current || selectedStopRef.current) return;
+      const now = Date.now();
+      if (now - lastBackgroundCheckRef.current < 15000) return;
+      lastBackgroundCheckRef.current = now;
+      void pullCloudRef.current(true);
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('focus', check);
+    window.addEventListener('pageshow', check);
+    window.addEventListener('online', check);
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(check, 120000);
+    return () => {
+      window.removeEventListener('focus', check);
+      window.removeEventListener('pageshow', check);
+      window.removeEventListener('online', check);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(interval);
+    };
+  }, [cloudConfigured, adminToken, isEditOpen, isOnline]);
 
   const loginAdmin = async () => {
     try {
@@ -193,8 +239,11 @@ export default function App() {
       setCloudStatus('正在發佈行程…');
       const result = await cloudWrite<{updatedAt:string}>('publish', {itinerary, galleries:remote, expectedUpdatedAt:cloudUpdatedAt}, adminToken);
       setCloudUpdatedAt(result.updatedAt); setCloudPhotoIds(remote);
+      latestCloudVersionRef.current = result.updatedAt;
+      unpublishedEditsRef.current = false;
       const nextData = {...cloudPhotoData};
       for (const [stopId, ids] of Object.entries(remote)) ids.forEach((id, i) => {nextData[id] = photoGalleries[stopId][i]});
+      photoCacheRef.current = nextData;
       setCloudPhotoData(nextData);
       setCloudStatus('發佈成功！家人重新整理網頁後即可查看。');
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '發佈失敗'); }
@@ -203,12 +252,14 @@ export default function App() {
 
   const handleSaveGallery = async (stopId: string, photos: string[]) => {
     if (!isAdmin) throw new Error('只有管理員可以修改照片');
+    unpublishedEditsRef.current = true;
     await writeGallery(stopId, photos);
     setPhotoGalleries(current => ({ ...current, [stopId]: photos }));
   };
 
   const handleApplyItinerary = (nextData: ItineraryData) => {
     if (!isAdmin) { setCloudStatus('請先以管理員身分登入後再匯入行程。'); return; }
+    unpublishedEditsRef.current = true;
     setItinerary(nextData);
     setDayDirection(1);
     setSelectedDayIndex(0);
@@ -280,7 +331,7 @@ export default function App() {
                 <Pencil className="w-3.5 h-3.5" /> {isEditOpen ? '關閉編輯' : '編輯行程'}
               </button>
             </div>}
-            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={setItinerary} onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
+            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
             <div className="mt-5">
