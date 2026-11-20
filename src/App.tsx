@@ -8,6 +8,7 @@ import { SAMPLE_TRIP } from './data/sampleTrip';
 import type { ItineraryData, ItineraryStop } from './types/itinerary';
 import { loadSavedItinerary, saveItineraryToStorage, validateItineraryData } from './utils/itinerary';
 import { loadPhotoGalleries, writeGallery } from './utils/photoGallery';
+import { readPublishedCache, readCachedPhotos, saveCachedPhoto, savePublishedSnapshot } from './utils/cloudCache';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useTripWeather } from './hooks/useTripWeather';
 import { PaperGrainOverlay } from './components/PaperGrainOverlay';
@@ -104,6 +105,7 @@ export default function App() {
   const latestCloudVersionRef = React.useRef('');
   const photoCacheRef = React.useRef<Record<string, string>>({});
   const lastBackgroundCheckRef = React.useRef(0);
+  const cloudRequestRef = React.useRef(false);
 
   const isOnline = useOnlineStatus();
   const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline, itinerary.days[selectedDayIndex]?.date);
@@ -131,52 +133,114 @@ export default function App() {
     setSelectedDayIndex(nextIndex);
   };
 
-  const pullCloud = async (background = false) => {
-    // Guest auto-refresh must never overwrite local, unpublished admin edits.
-    if (background && (adminToken || unpublishedEditsRef.current || isEditOpen || selectedStopRef.current || document.hidden)) return;
+  const applyCloudPhotos = (galleriesById: Record<string, string[]>, photos: Record<string, string>) => {
+    const galleries: Record<string, string[]> = {};
+    for (const [stopId, ids] of Object.entries(galleriesById)) {
+      galleries[stopId] = ids.map(id => photos[id]).filter((url): url is string => Boolean(url));
+    }
+    setCloudPhotoData({ ...photos });
+    setPhotoGalleries(galleries);
+  };
 
-    if (!cloudConfigured || cloudBusy) return;
-    setCloudBusy(true); setCloudStatus('正在取得雲端行程…');
+  const pullCloud = async (background = false) => {
+    // Never replace an administrator's unpublished changes with the published copy.
+    if (background && (adminToken || unpublishedEditsRef.current || isEditOpen || selectedStopRef.current || document.hidden)) return;
+    if (!cloudConfigured || cloudRequestRef.current) return;
+    cloudRequestRef.current = true;
+    if (!background) { setCloudBusy(true); setCloudStatus('正在檢查雲端行程…'); }
     try {
       const snapshot = await cloudRead<CloudSnapshot | null>({action:'snapshot'});
       if (!snapshot) {
-        setCloudUpdatedAt(''); setCloudPhotoIds({}); setCloudLoaded(true);
-        setCloudStatus('雲端尚無行程，管理員可發佈目前台灣行程。');
+        if (!background) {
+          setCloudUpdatedAt(''); setCloudPhotoIds({}); setCloudLoaded(true);
+          setCloudStatus('雲端尚無行程，管理員可發佈目前台灣行程。');
+        }
         return;
       }
-      if (background && snapshot.updatedAt && snapshot.updatedAt === latestCloudVersionRef.current) {
+      const ids = [...new Set(Object.values(snapshot.galleries || {}).flat())];
+      const sameVersion = Boolean(snapshot.updatedAt && snapshot.updatedAt === latestCloudVersionRef.current);
+      const missing = ids.filter(id => !photoCacheRef.current[id]);
+      if (sameVersion && missing.length === 0) {
         setCloudLoaded(true);
-        setCloudStatus('已是最新雲端行程。');
+        if (!background) setCloudStatus('已是最新雲端行程。');
         return;
       }
       const validated = validateItineraryData(snapshot.itinerary);
       if (!validated.ok) throw new Error(validated.error);
-      setItinerary(validated.data);
-      setCloudPhotoIds(snapshot.galleries || {});
-      setCloudUpdatedAt(snapshot.updatedAt || '');
-      latestCloudVersionRef.current = snapshot.updatedAt || '';
-      setCloudLoaded(true);
-      setCloudStatus('已載入雲端行程，正在同步照片…');
-      const allIds = Array.from(new Set(Object.values(snapshot.galleries || {}).flat()));
-      const photoMap: Record<string,string> = { ...photoCacheRef.current };
-      for (const id of allIds) {
-        if (photoMap[id]) continue;
-        try { photoMap[id] = await loadCloudPhoto(id); }
-        catch { /* Keep remaining pictures viewable even if one fails. */ }
+      // A warm cache must not be overwritten by an unchanged cloud response.
+      if (!sameVersion) {
+        setItinerary(validated.data);
+        setCloudPhotoIds(snapshot.galleries || {});
+        setCloudUpdatedAt(snapshot.updatedAt || '');
+        latestCloudVersionRef.current = snapshot.updatedAt || '';
+        setCloudLoaded(true);
+        // Persist only the published snapshot, never draft administrator edits.
+        void savePublishedSnapshot(snapshot).catch(() => {});
+      }
+      const photoMap = { ...photoCacheRef.current };
+      if (missing.length) {
+        try { Object.assign(photoMap, await readCachedPhotos(missing)); }
+        catch { /* Device storage might be disabled; cloud loading still works. */ }
       }
       photoCacheRef.current = photoMap;
-      setCloudPhotoData(photoMap);
-      const galleries: Record<string,string[]> = {};
-      for (const [stopId, ids] of Object.entries(snapshot.galleries || {})) {
-        galleries[stopId] = ids.map(id=>photoMap[id]).filter(Boolean);
+      applyCloudPhotos(snapshot.galleries || {}, photoMap);
+      const uncached = ids.filter(id => !photoMap[id]);
+      if (uncached.length && !background) setCloudStatus('正在載入新照片…');
+      // Download only missing images. Download a few concurrently, not the whole library on every launch.
+      for (let i = 0; i < uncached.length; i += 3) {
+        const batch = uncached.slice(i, i + 3);
+        await Promise.all(batch.map(async id => {
+          try {
+            const photo = await loadCloudPhoto(id);
+            photoMap[id] = photo;
+            void saveCachedPhoto(id, photo).catch(() => {});
+          } catch { /* Leave any already cached images untouched. */ }
+        }));
+        photoCacheRef.current = { ...photoMap };
+        applyCloudPhotos(snapshot.galleries || {}, photoMap);
       }
-      setPhotoGalleries(galleries);
-      setCloudStatus(allIds.length === Object.keys(photoMap).length ? '雲端行程及照片已同步。' : '行程已同步，部分照片未能載入。');
-    } catch (error) { setCloudStatus(error instanceof Error ? error.message : '同步失敗'); }
-    finally { setCloudBusy(false); }
+      if (!background) {
+        setCloudStatus(ids.every(id => photoMap[id]) ? '雲端行程及照片已同步。' : '行程已同步，部分照片未能載入。');
+      }
+    } catch (error) {
+      // Silent background failures must not interrupt or erase the last good copy.
+      if (!background) setCloudStatus(error instanceof Error ? error.message : '同步失敗');
+    } finally {
+      cloudRequestRef.current = false;
+      if (!background) setCloudBusy(false);
+    }
   };
 
-  useEffect(() => { if (cloudConfigured) { lastBackgroundCheckRef.current = Date.now(); void pullCloud(); } }, []);
+  useEffect(() => {
+    if (!cloudConfigured) return;
+    let active = true;
+    const boot = async () => {
+      try {
+        const cached = await readPublishedCache();
+        if (active && cached) {
+          const validated = validateItineraryData(cached.snapshot.itinerary);
+          if (validated.ok) {
+            setItinerary(validated.data);
+            setCloudUpdatedAt(cached.snapshot.updatedAt);
+            setCloudPhotoIds(cached.snapshot.galleries);
+            latestCloudVersionRef.current = cached.snapshot.updatedAt;
+            photoCacheRef.current = cached.photos;
+            applyCloudPhotos(cached.snapshot.galleries, cached.photos);
+            setCloudLoaded(true);
+            setCloudStatus('已顯示手機儲存的行程，背景檢查更新。');
+          }
+        }
+      } catch { /* IndexedDB can be disabled; continue with normal cloud fetch. */ }
+      if (active) {
+        lastBackgroundCheckRef.current = Date.now();
+        // First launch still checks the cloud, silently if a stored copy exists.
+        // Keep this request in the foreground when no local copy exists.
+        void pullCloudRef.current(Boolean(latestCloudVersionRef.current));
+      }
+    };
+    void boot();
+    return () => { active = false; };
+  }, []);
 
   // Opening the PWA, returning from another app, and returning online fetch
   // the latest published version automatically. The visible Reload button
@@ -245,7 +309,10 @@ export default function App() {
       for (const [stopId, ids] of Object.entries(remote)) ids.forEach((id, i) => {nextData[id] = photoGalleries[stopId][i]});
       photoCacheRef.current = nextData;
       setCloudPhotoData(nextData);
-      setCloudStatus('發佈成功！家人重新整理網頁後即可查看。');
+      // Save newly published state for the administrator's own next launch too.
+      void savePublishedSnapshot({version:1, updatedAt:result.updatedAt, itinerary, galleries:remote}).catch(() => {});
+      for (const [id, photo] of Object.entries(nextData)) void saveCachedPhoto(id, photo).catch(() => {});
+      setCloudStatus('發佈成功！家人開啟 App 後會自動更新。');
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '發佈失敗'); }
     finally { setCloudBusy(false); }
   };
