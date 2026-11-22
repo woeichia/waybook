@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { WifiOff, Pencil } from 'lucide-react';
 import { playUiSound, readSoundEnabled, storeSoundEnabled } from './utils/uiSounds';
 import { CloudPanel } from './components/CloudPanel';
+import type { RoutePlanResponse } from './utils/routePlanning';
 import { GOOGLE_CLIENT_ID, cloudRead, cloudWrite, getGoogleIdToken, loadCloudPhoto, type CloudSnapshot, hasCloudConfiguration } from './utils/driveCloud';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { SAMPLE_TRIP } from './data/sampleTrip';
@@ -453,7 +454,7 @@ export default function App() {
                 <Pencil className="w-3.5 h-3.5" /> {isEditOpen ? '關閉編輯' : '編輯行程'}
               </button>
             </div>}
-            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos}
+            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos} onEstimateRoutes={async stops => { if (!adminToken) throw new Error('請先以管理員身分登入'); return cloudWrite<RoutePlanResponse>('routePlan', {stops}, adminToken); }}
                photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length)])]}
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />

@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Camera, Check, CopyPlus, Plus, Trash2, X } from 'lu
 import type { ItineraryData, ItineraryDay, ItineraryStop } from '../types/itinerary';
 import { compressImageToDataUrl } from '../utils/customPhotos';
 import { applyPlanTimes, clock, eventDuration, planStops, type PlannerInputs } from '../utils/schedulePlanner';
+import type { RoutePlanResponse, RouteStop } from '../utils/routePlanning';
 
 interface Props {
   data: ItineraryData;
@@ -11,6 +12,7 @@ interface Props {
   onPhoto: (id: string, dataUrl: string) => Promise<boolean>;
   onCopyEventPhotos?: (sourceId: string, newId: string) => void;
   photoEventIds?: string[];
+  onEstimateRoutes?: (stops: RouteStop[]) => Promise<RoutePlanResponse>;
   onClose: () => void;
 }
 const inputClass = 'w-full min-h-10 px-3 py-2 rounded-xl bg-white ring-1 ring-black/10 text-sm text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#1F3FB0]';
@@ -19,7 +21,7 @@ function Field({ label, value, onChange, rows }: { label: string; value: string;
     {rows ? <textarea className={`${inputClass} mt-1 resize-y`} rows={rows} value={value} onChange={e => onChange(e.target.value)} /> : <input className={`${inputClass} mt-1`} value={value} onChange={e => onChange(e.target.value)} />}
   </label>;
 }
-export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEventPhotos, photoEventIds = [], onClose }: Props) {
+export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEventPhotos, onEstimateRoutes, photoEventIds = [], onClose }: Props) {
   const day = data.days[dayIndex];
   const [expanded, setExpanded] = useState<string | null>(null);
   const [status, setStatus] = useState('');
@@ -34,6 +36,10 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
   const [travelEdits, setTravelEdits] = useState<Record<string, number>>({});
   const [durationEdits, setDurationEdits] = useState<Record<string, number>>({});
   const [fixedEdits, setFixedEdits] = useState<Record<string, boolean>>({});
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [routeError, setRouteError] = useState('');
+  const [routeEstimate, setRouteEstimate] = useState<RoutePlanResponse | null>(null);
+  const [routeChecked, setRouteChecked] = useState(false);
   if (!day) return null;
   const updateDay = (patch: Partial<ItineraryDay>) => {
     onChange({ ...data, days: data.days.map((d, i) => i === dayIndex ? { ...d, ...patch } : d) });
@@ -59,7 +65,7 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
     setPlannerStart('09:00');
     setPlannerEnd(data.days[nextDay]?.title.includes('包車') ? '19:00' : '21:00');
     setPlannerBuffer(15);
-    setTravelEdits({}); setDurationEdits({}); setFixedEdits({});
+    setTravelEdits({}); setDurationEdits({}); setFixedEdits({}); setRouteEstimate(null); setRouteError(''); setRouteChecked(false);
   };
   const movingStop = transfer ? day.stops.find(stop => stop.id === transfer.id) : undefined;
   const targetDay = data.days[destinationDay];
@@ -70,8 +76,26 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
   ] : [];
   const plannerInputs: PlannerInputs = {startTime:plannerStart,endTime:plannerEnd,bufferMinutes:plannerBuffer,travelById:travelEdits,durationById:durationEdits,fixedById:fixedEdits};
   const plan = proposedStops.length ? planStops(proposedStops,plannerInputs) : null;
+  const estimateRoutes = async () => {
+    if (!onEstimateRoutes || !proposedStops.length || routeBusy) return;
+    setRouteBusy(true); setRouteError(''); setRouteEstimate(null); setRouteChecked(false);
+    try {
+      const output = await onEstimateRoutes(proposedStops.map(stop => ({id:stop.id, location:stop.mapQuery || stop.locationName || stop.title})));
+      setRouteEstimate(output);
+      setRouteChecked(true);
+      const updates: Record<string, number> = {};
+      output.legs.forEach(leg => { if (leg.minutes != null && leg.fromId && leg.toId) updates[leg.toId] = leg.minutes; });
+      // Failed routing leaves the leg unverified; never silently overwrite it with a false estimate.
+      setTravelEdits(current => ({...current, ...updates}));
+    } catch (error) {
+      setRouteError(error instanceof Error ? error.message : '路線服務暫時無法使用');
+    } finally { setRouteBusy(false); }
+  };
+  const resetRouteEstimate = () => { setRouteEstimate(null); setRouteChecked(false); setRouteError(''); setTravelEdits({}); };
   const transferEvent = () => {
     if (!transfer || !movingStop || destinationDay === dayIndex || !targetDay || !plan) return;
+    if (!routeChecked && !window.confirm('尚未取得道路交通時間，30 分鐘只是佔位估算。請先按「計算實際道路時間」或手動核實每段交通。仍然繼續？')) return;
+    if (routeEstimate?.legs.some(leg => leg.minutes == null || leg.error) && !window.confirm('部分路段無法取得有效道路路線，行程不能視為已驗證。仍要自行承擔並繼續？')) return;
     if (plan.issues.length && !window.confirm(`行程存在 ${plan.issues.length} 項時間衝突，仍要依預覽時間套用嗎？\n\n${plan.issues.join('\n')}`)) return;
     if (plan.unverified && !window.confirm(`還有 ${plan.unverified} 項交通／停留時間為未核實估計，可能不符合實際路程。仍要繼續嗎？`)) return;
     const isCopy = transfer.mode === 'copy';
@@ -138,12 +162,12 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
       <p className="text-sm font-semibold">{transfer.mode === 'move' ? '移動活動' : '複製活動'} · 智能時間預覽</p>
       <p className="text-xs text-[#68635C]">此版本不呼叫地圖路線 API。交通時間及未知活動時長是估計值，須由你自行核實；不會自動刪除活動或修改來源日的其他行程。</p>
       <label className="text-xs block">目標日期
-        <select className={`${inputClass} mt-1`} value={destinationDay} onChange={e => {const i=Number(e.target.value);setDestinationDay(i);setInsertAt(data.days[i]?.stops.length??0);setPlannerEnd(data.days[i]?.title.includes('包車')?'19:00':'21:00');setTravelEdits({});setDurationEdits({});setFixedEdits({});}}>
+        <select className={`${inputClass} mt-1`} value={destinationDay} onChange={e => {const i=Number(e.target.value);setDestinationDay(i);setInsertAt(data.days[i]?.stops.length??0);setPlannerEnd(data.days[i]?.title.includes('包車')?'19:00':'21:00');setTravelEdits({});setDurationEdits({});setFixedEdits({});resetRouteEstimate();}}>
           {data.days.map((d,i)=><option key={`${d.date}-${i}`} value={i} disabled={i===dayIndex}>{d.date} · {d.title}</option>)}
         </select>
       </label>
       <label className="text-xs block">插入活動位置
-        <select className={`${inputClass} mt-1`} value={insertAt} onChange={e=>setInsertAt(Number(e.target.value))}>
+        <select className={`${inputClass} mt-1`} value={insertAt} onChange={e=>{setInsertAt(Number(e.target.value));resetRouteEstimate();}}>
           {Array.from({length:targetDay.stops.length+1},(_,i)=><option key={i} value={i}>{i===0?'當日第一站':`在「${targetDay.stops[i-1]?.title}」之後`}</option>)}
         </select>
       </label>
@@ -153,6 +177,17 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
         <label className="text-xs col-span-2">每站交通後緩衝（分鐘）<input type="number" min={0} max={120} className={`${inputClass} mt-1`} value={plannerBuffer} onChange={e=>setPlannerBuffer(Math.max(0,Math.min(120,Number(e.target.value)||0)))}/></label>
       </div>
       <p className="text-xs text-[#68635C]">包車日預設 09:00–19:00（10 小時）；非包車日預設 09:00–21:00。可依當天實際安排修改。包車結束後自行安排的活動，請另行評估。</p>
+      <div className="rounded-xl border border-[#C9D4EA] bg-[#F0F4FB] p-3 space-y-2">
+        <p className="font-semibold text-xs">道路路線驗證 · OpenRouteService</p>
+        <p className="text-xs text-[#555E70]">依照目前順序識別地點，逐段計算行車時間。按下按鈕後才會呼叫服務；不會在每次開啟 App 時自動扣除免費額度。定位錯誤、無法連線或路線失敗時會保留警告，請手動確認。</p>
+        <button type="button" disabled={!onEstimateRoutes || routeBusy} onClick={()=>{void estimateRoutes();}} className="rounded-full bg-[#1F3FB0] text-white px-4 py-2 text-xs disabled:opacity-50">{routeBusy ? '正在查詢道路與地點…' : '計算實際道路時間'}</button>
+        {routeError && <p role="alert" className="text-xs text-red-800">{routeError}</p>}
+        {routeEstimate && <div className="space-y-1.5">
+          <p className="text-xs font-semibold">{routeEstimate.legs.every(leg=>leg.minutes!=null) ? '道路估計已返回（仍須考慮路況）' : '部分路段未成功，請檢查地點並人工核實'}</p>
+          {routeEstimate.legs.map((leg,i)=><p key={`${leg.fromId}-${leg.toId}-${i}`} className={`text-xs ${leg.minutes==null?'text-red-800':'text-[#334766]'}`}>{i+1}. {leg.fromLabel} → {leg.toLabel}：{leg.minutes==null ? (leg.error || '未能估算') : `${leg.minutes} 分鐘 · ${leg.km?.toFixed(1) ?? '?'} km`}</p>)}
+          <p className="text-[11px] text-[#555E70]">{routeEstimate.note || '行車時間為道路模型估計，不包含即時塞車、停車或景點排隊。'}</p>
+        </div>}
+      </div>
       <div className="space-y-2">
         {plan.rows.map((row,i)=><div key={row.stop.id} className={`rounded-xl p-2.5 ${row.stop.id === '__waybook_preview_copy__'||row.stop.id===movingStop.id?'bg-[#EDF0FA]':'bg-[#F5F4F1]'}`}>
           <div className="flex items-center justify-between gap-2"><span className="font-semibold text-xs">{i+1}. {row.stop.title}</span><span className="font-mono text-xs shrink-0">{clock(row.start)}–{clock(row.end)}</span></div>
