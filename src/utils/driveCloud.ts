@@ -1,7 +1,7 @@
 import type { ItineraryData } from '../types/itinerary';
 
 /** Public cloud snapshots contain only references to image files, not binary images. */
-export type CloudSnapshot = { version: number; updatedAt: string; itinerary: ItineraryData; galleries: Record<string, string[]> };
+export type CloudSnapshot = { version: number; updatedAt: string; itinerary: ItineraryData; galleries: Record<string, string[]>; memoryGalleries?: Record<string, {id:string;caption:string}[]> };
 export const CLOUD_URL = (import.meta.env.VITE_WAYBOOK_APPS_SCRIPT_URL || '').trim();
 export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_WAYBOOK_GOOGLE_CLIENT_ID || '').trim();
 

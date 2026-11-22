@@ -9,6 +9,8 @@ import { SAMPLE_TRIP } from './data/sampleTrip';
 import type { ItineraryData, ItineraryStop } from './types/itinerary';
 import { loadSavedItinerary, saveItineraryToStorage, validateItineraryData } from './utils/itinerary';
 import { loadPhotoGalleries, writeGallery } from './utils/photoGallery';
+import { MemoryGallery, type MemoryPhoto } from './components/MemoryGallery';
+import { readMemories, writeMemories } from './utils/memoryGallery';
 import { readPublishedCache, readCachedPhotos, saveCachedPhoto, savePublishedSnapshot } from './utils/cloudCache';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useTripWeather } from './hooks/useTripWeather';
@@ -52,7 +54,14 @@ export default function App() {
   const [itinerary, setItinerary] = useState<ItineraryData>(() => loadSavedItinerary() ?? SAMPLE_TRIP);
   const [photoGalleries, setPhotoGalleries] = useState<Record<string, string[]>>({});
   const [photoStorageError, setPhotoStorageError] = useState<string | null>(null);
-  useEffect(() => { if (!hasCloudConfiguration()) loadPhotoGalleries().then(setPhotoGalleries).catch(() => setPhotoStorageError('瀏覽器照片儲存無法使用，請確認沒有使用私人瀏覽模式。')); }, []);
+  const [memoryGalleries, setMemoryGalleries] = useState<Record<string, MemoryPhoto[]>>({});
+  const [cloudMemoryRefs, setCloudMemoryRefs] = useState<Record<string, {id:string;caption:string}[]>>({});
+  const editedMemoryIdsRef = React.useRef(new Set<string>());
+  const pendingMemoryKey = 'waybook_v15_pending_memory_ids';
+  useEffect(() => { if (!hasCloudConfiguration()) {
+    loadPhotoGalleries().then(setPhotoGalleries).catch(() => setPhotoStorageError('瀏覽器照片儲存無法使用，請確認沒有使用私人瀏覽模式。'));
+    readMemories().then(setMemoryGalleries).catch(() => {});
+  } }, []);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [dayDirection, setDayDirection] = useState(1);
   const [viewMode, setViewMode] = useState<ItineraryViewMode>('timeline');
@@ -135,13 +144,19 @@ export default function App() {
     setSelectedDayIndex(nextIndex);
   };
 
-  const applyCloudPhotos = (galleriesById: Record<string, string[]>, photos: Record<string, string>) => {
+  const applyCloudPhotos = (galleriesById: Record<string, string[]>, photos: Record<string, string>, memories: Record<string,{id:string;caption:string}[]> = {}) => {
     const galleries: Record<string, string[]> = {};
     for (const [stopId, ids] of Object.entries(galleriesById)) {
       galleries[stopId] = ids.map(id => photos[id]).filter((url): url is string => Boolean(url));
     }
     setCloudPhotoData({ ...photos });
     setPhotoGalleries(galleries);
+    const memoryMap: Record<string,MemoryPhoto[]> = {};
+    for (const [stopId, refs] of Object.entries(memories)) {
+      memoryMap[stopId] = refs.map(ref => ({id:ref.id,src:photos[ref.id] || '',caption:ref.caption || ''}));
+    }
+    // Keep memory references even while photos download; do not silently discard uncached media.
+    setMemoryGalleries(memoryMap);
   };
 
   const pullCloud = async (background = false) => {
@@ -159,7 +174,8 @@ export default function App() {
         }
         return;
       }
-      const ids = [...new Set(Object.values(snapshot.galleries || {}).flat())];
+      const memoryRefs = snapshot.memoryGalleries || {};
+      const ids = [...new Set([...Object.values(snapshot.galleries || {}).flat(), ...Object.values(memoryRefs).flat().map(item=>item.id)])];
       const sameVersion = Boolean(snapshot.updatedAt && snapshot.updatedAt === latestCloudVersionRef.current);
       const missing = ids.filter(id => !photoCacheRef.current[id]);
       if (sameVersion && missing.length === 0) {
@@ -173,6 +189,7 @@ export default function App() {
       if (!sameVersion) {
         setItinerary(validated.data);
         setCloudPhotoIds(snapshot.galleries || {});
+        setCloudMemoryRefs(memoryRefs);
         setCloudUpdatedAt(snapshot.updatedAt || '');
         latestCloudVersionRef.current = snapshot.updatedAt || '';
         setCloudLoaded(true);
@@ -185,7 +202,7 @@ export default function App() {
         catch { /* Device storage might be disabled; cloud loading still works. */ }
       }
       photoCacheRef.current = photoMap;
-      applyCloudPhotos(snapshot.galleries || {}, photoMap);
+      applyCloudPhotos(snapshot.galleries || {}, photoMap, memoryRefs);
       const uncached = ids.filter(id => !photoMap[id]);
       if (uncached.length && !background) setCloudStatus('正在載入新照片…');
       // Download only missing images. Download a few concurrently, not the whole library on every launch.
@@ -199,7 +216,7 @@ export default function App() {
           } catch { /* Leave any already cached images untouched. */ }
         }));
         photoCacheRef.current = { ...photoMap };
-        applyCloudPhotos(snapshot.galleries || {}, photoMap);
+        applyCloudPhotos(snapshot.galleries || {}, photoMap, memoryRefs);
       }
       if (!background) {
         setCloudStatus(ids.every(id => photoMap[id]) ? '雲端行程及照片已同步。' : '行程已同步，部分照片未能載入。');
@@ -225,9 +242,10 @@ export default function App() {
             setItinerary(validated.data);
             setCloudUpdatedAt(cached.snapshot.updatedAt);
             setCloudPhotoIds(cached.snapshot.galleries);
+            setCloudMemoryRefs(cached.snapshot.memoryGalleries || {});
             latestCloudVersionRef.current = cached.snapshot.updatedAt;
             photoCacheRef.current = cached.photos;
-            applyCloudPhotos(cached.snapshot.galleries, cached.photos);
+            applyCloudPhotos(cached.snapshot.galleries, cached.photos, cached.snapshot.memoryGalleries || {});
             setCloudLoaded(true);
             setCloudStatus('已顯示手機儲存的行程，背景檢查更新。');
           }
@@ -278,6 +296,21 @@ export default function App() {
       const token = await getGoogleIdToken(GOOGLE_CLIENT_ID);
       // The Apps Script server verifies this token and checks the admin email for every write.
       setAdminToken(token); setCloudStatus('已取得 Google 登入憑證，發佈時將由伺服器驗證管理員權限。');
+      // Restore only unpublished memory edits saved locally, not stale published images.
+      try {
+        const ids: string[] = JSON.parse(localStorage.getItem(pendingMemoryKey) || '[]');
+        if (Array.isArray(ids) && ids.length) {
+          const drafts = await readMemories();
+          ids.forEach(id => editedMemoryIdsRef.current.add(id));
+          setMemoryGalleries(current => {
+            const next = {...current};
+            ids.forEach(id=>{if(drafts[id]) next[id] = drafts[id];else if(!next[id]) next[id]=[];});
+            return next;
+          });
+          unpublishedEditsRef.current = true;
+          setCloudStatus('已登入；偵測到未發佈的本機回憶照片修改，請檢查後再發佈。');
+        }
+      } catch { /* Existing published copy is unaffected if local drafts cannot be loaded. */ }
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '登入失敗'); }
   };
 
@@ -311,36 +344,83 @@ export default function App() {
           remote[stopId].push(photoId);
         }
       }
-      setCloudStatus('正在發佈行程…');
-      const result = await cloudWrite<{updatedAt:string}>('publish', {itinerary, galleries:remote, expectedUpdatedAt:cloudUpdatedAt}, adminToken);
-      setCloudUpdatedAt(result.updatedAt); setCloudPhotoIds(remote);
+      // Memory photo references are independent from reference/planning galleries.
+      // Preserve unchanged remote IDs, including photos not yet loaded on this phone.
+      const memoryRemote: Record<string,{id:string;caption:string}[]> = {};
+      for (const [stopId, refs] of Object.entries(cloudMemoryRefs)) {
+        if (activeStopIds.has(stopId) && !editedMemoryIdsRef.current.has(stopId)) memoryRemote[stopId] = [...refs];
+      }
+      for (const stopId of editedMemoryIdsRef.current) {
+        if (!activeStopIds.has(stopId)) continue;
+        memoryRemote[stopId] = [];
+        for (const photo of (memoryGalleries[stopId] || [])) {
+          let fileId = photo.id && photo.id.length >= 10 && photo.id.length <= 120 ? photo.id : '';
+          if (!fileId && photo.src) fileId = Object.keys(cloudPhotoData).find(id => cloudPhotoData[id] === photo.src) || '';
+          if (!fileId) {
+            if (!photo.src.startsWith('data:image/')) throw new Error('回憶照片尚未準備好，請重新選擇照片。');
+            setCloudStatus(`正在上傳 ${stopId} 的回憶照片…`);
+            const uploaded = await cloudWrite<{fileId:string}>('uploadPhoto', {dataUrl:photo.src}, adminToken);
+            fileId = uploaded.fileId;
+          }
+          memoryRemote[stopId].push({id:fileId,caption:photo.caption.slice(0,240)});
+        }
+      }
+      setCloudStatus('正在發佈行程及回憶…');
+      const result = await cloudWrite<{updatedAt:string}>('publish', {itinerary, galleries:remote, memoryGalleries:memoryRemote, expectedUpdatedAt:cloudUpdatedAt}, adminToken);
+      setCloudUpdatedAt(result.updatedAt); setCloudPhotoIds(remote); setCloudMemoryRefs(memoryRemote);
       latestCloudVersionRef.current = result.updatedAt;
       unpublishedEditsRef.current = false;
       editedGalleryIdsRef.current.clear();
+      editedMemoryIdsRef.current.clear();
+      try { localStorage.removeItem(pendingMemoryKey); } catch { /* Private mode */ }
       const nextData = {...cloudPhotoData};
       for (const [stopId, ids] of Object.entries(remote)) ids.forEach((id, i) => {
         const photo = photoGalleries[stopId]?.[i];
         if (photo) nextData[id] = photo;
       });
+      for (const [stopId, refs] of Object.entries(memoryRemote)) {
+        refs.forEach((ref, index) => {
+          const photo = memoryGalleries[stopId]?.[index];
+          if (photo?.src) nextData[ref.id] = photo.src;
+        });
+      }
       photoCacheRef.current = nextData;
       setCloudPhotoData(nextData);
       // Save newly published state for the administrator's own next launch too.
-      void savePublishedSnapshot({version:1, updatedAt:result.updatedAt, itinerary, galleries:remote}).catch(() => {});
+      void savePublishedSnapshot({version:1, updatedAt:result.updatedAt, itinerary, galleries:remote, memoryGalleries:memoryRemote}).catch(() => {});
       for (const [id, photo] of Object.entries(nextData)) void saveCachedPhoto(id, photo).catch(() => {});
       setCloudStatus('發佈成功！家人開啟 App 後會自動更新。');
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '發佈失敗'); }
     finally { setCloudBusy(false); }
   };
 
+  const handleSaveMemories = async (stopId: string, items: MemoryPhoto[]) => {
+    if (!isAdmin) throw new Error('只有管理員可以修改回憶');
+    if (items.length > 12) throw new Error('每個活動最多 12 張回憶照片');
+    // Save locally first so a failed upload cannot lose a draft.
+    await writeMemories(stopId, items);
+    editedMemoryIdsRef.current.add(stopId);
+    try {localStorage.setItem(pendingMemoryKey, JSON.stringify([...editedMemoryIdsRef.current]));} catch { /* IndexedDB still retains media */ }
+    unpublishedEditsRef.current = true;
+    setMemoryGalleries(current => ({...current,[stopId]:items}));
+  };
+
   const handleCopyEventPhotos = (sourceId: string, newId: string) => {
     const originals = photoGalleries[sourceId] || [];
     const refs = cloudPhotoIds[sourceId] || [];
-    if (!originals.length && !refs.length) return;
+    const memoryItems = memoryGalleries[sourceId] || [];
+    const memoryRefs = cloudMemoryRefs[sourceId] || [];
+    if (!originals.length && !refs.length && !memoryItems.length && !memoryRefs.length) return;
     // Copies share existing media file IDs without re-uploading. Even if the phone
     // has only partially downloaded a gallery, the cloud references remain intact.
     if (refs.length) setCloudPhotoIds(current => ({...current,[newId]:[...refs]}));
     else editedGalleryIdsRef.current.add(newId);
     if (originals.length) setPhotoGalleries(current => ({ ...current, [newId]: [...originals] }));
+    if (memoryRefs.length) setCloudMemoryRefs(current=>({...current,[newId]:memoryRefs.map(v=>({...v}))}));
+    if (memoryItems.length) {
+      setMemoryGalleries(current=>({...current,[newId]:memoryItems.map(v=>({...v}))}));
+      void writeMemories(newId,memoryItems).catch(()=>{});
+    }
     unpublishedEditsRef.current = true;
   };
   const handleSaveGallery = async (stopId: string, photos: string[]) => {
@@ -351,7 +431,7 @@ export default function App() {
     setPhotoGalleries(current => ({ ...current, [stopId]: photos }));
   };
 
-  const handleApplyItinerary = (nextData: ItineraryData, backupGalleryRefs?: Record<string,string[]>) => {
+  const handleApplyItinerary = (nextData: ItineraryData, backupGalleryRefs?: Record<string,string[]>, backupMemoryRefs?: Record<string,{id:string;caption:string}[]>) => {
     if (!isAdmin) { setCloudStatus('請先以管理員身分登入後再匯入行程。'); return; }
     unpublishedEditsRef.current = true;
     if (backupGalleryRefs) {
@@ -381,6 +461,21 @@ export default function App() {
             return merged;
           });
         })();
+      }
+    }
+    if (backupMemoryRefs) {
+      const additions:Record<string,{id:string;caption:string}[]> = {};
+      for (const [id,refs] of Object.entries(backupMemoryRefs)) {
+        if (!cloudMemoryRefs[id]?.length && refs.length) additions[id] = refs;
+      }
+      if (Object.keys(additions).length) {
+        setCloudMemoryRefs(current=>({...current,...additions}));
+        // References are kept even if binary photo downloads are not yet available.
+        setMemoryGalleries(current=>{
+          const merged={...current};
+          for(const [id,refs] of Object.entries(additions)) if(!merged[id]?.length) merged[id] = refs.map(r=>({id:r.id,src:photoCacheRef.current[r.id]||'',caption:r.caption}));
+          return merged;
+        });
       }
     }
     setItinerary(nextData);
@@ -455,7 +550,7 @@ export default function App() {
               </button>
             </div>}
             {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos} onEstimateRoutes={async stops => { if (!adminToken) throw new Error('請先以管理員身分登入'); return cloudWrite<RoutePlanResponse>('routePlan', {stops}, adminToken); }}
-               photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length)])]}
+               photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length), ...Object.keys(cloudMemoryRefs).filter(id=>cloudMemoryRefs[id]?.length), ...Object.keys(memoryGalleries).filter(id=>memoryGalleries[id]?.length)])]}
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
@@ -515,6 +610,8 @@ export default function App() {
         <StopDetailSheet
           stop={selectedStop}
           gallery={selectedStop ? (photoGalleries[selectedStop.id] ?? []) : []}
+          memoryPhotos={selectedStop ? (memoryGalleries[selectedStop.id] ?? []) : []}
+          onSaveMemories={handleSaveMemories}
           onSaveGallery={handleSaveGallery}
           onGalleryTick={() => {
             void playUiSound('slide', soundEnabled);
@@ -533,6 +630,7 @@ export default function App() {
           onClose={() => setIsShareOpen(false)}
           onApplyItinerary={handleApplyItinerary}
           cloudGalleryReferences={cloudPhotoIds}
+          cloudMemoryReferences={cloudMemoryRefs}
           galleryEventIds={Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length)}
           readOnly={!isAdmin}
         />

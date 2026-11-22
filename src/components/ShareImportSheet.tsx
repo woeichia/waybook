@@ -20,8 +20,9 @@ interface ShareImportSheetProps {
   isOpen: boolean;
   currentTrip: ItineraryData;
   onClose: () => void;
-  onApplyItinerary: (data: ItineraryData, galleryReferences?: Record<string, string[]>) => void;
+  onApplyItinerary: (data: ItineraryData, galleryReferences?: Record<string, string[]>, memories?: Record<string,{id:string;caption:string}[]>) => void;
   cloudGalleryReferences?: Record<string, string[]>;
+  cloudMemoryReferences?: Record<string,{id:string;caption:string}[]>;
   galleryEventIds?: string[];
   readOnly?: boolean;
 }
@@ -40,6 +41,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   onClose,
   onApplyItinerary,
   cloudGalleryReferences = {},
+  cloudMemoryReferences = {},
   galleryEventIds = [],
   readOnly = false,
 }) => {
@@ -50,7 +52,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
 
   const [jsonInput, setJsonInput] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const [importPreview, setImportPreview] = useState<{data: ItineraryData; refs?: Record<string,string[]>; summary: string} | null>(null);
+  const [importPreview, setImportPreview] = useState<{data: ItineraryData; refs?: Record<string,string[]>; memories?: Record<string,{id:string;caption:string}[]>; summary: string} | null>(null);
   const [copiedState, setCopiedState] = useState<'json' | 'link' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -126,7 +128,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
     if (new Set(rawIds).size !== rawIds.length) throw new Error('匯入檔案有重複活動 ID，請先修正。');
     const incoming = new Set(rawIds);
     const currentIds = new Set(currentTrip.days.flatMap(d => d.stops.map(s => s.id)));
-    const existingGalleryIds = new Set([...Object.keys(cloudGalleryReferences), ...galleryEventIds]);
+    const existingGalleryIds = new Set([...Object.keys(cloudGalleryReferences), ...Object.keys(cloudMemoryReferences), ...galleryEventIds]);
     const detached = [...existingGalleryIds].filter(id => currentIds.has(id) && !incoming.has(id));
     if (detached.length) throw new Error(`停止匯入：${detached.length} 個有照片的活動 ID 消失，會造成照片失去連結。請保留原 ID，或先移動活動。`);
     const refsRaw = fullBackup && object?.galleries && typeof object.galleries === 'object' ? object.galleries as Record<string, unknown> : undefined;
@@ -137,11 +139,19 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
       }
       refs[id] = list as string[];
     }
+    const memoriesRaw = fullBackup && object?.memoryGalleries && typeof object.memoryGalleries === 'object' ? object.memoryGalleries as Record<string,unknown> : undefined;
+    const memories: Record<string,{id:string;caption:string}[]> | undefined = memoriesRaw ? {} : undefined;
+    if (memories && memoriesRaw) for (const [id, list] of Object.entries(memoriesRaw)) {
+      if (!incoming.has(id) || !Array.isArray(list) || list.length > 12 || list.some(item => !item || typeof item !== 'object' ||
+          typeof item.id !== 'string' || !/^[A-Za-z0-9_-]{10,120}$/.test(item.id) || typeof item.caption !== 'string' || item.caption.length > 240))
+        throw new Error('完整備份的回憶照片參照不正確，無法安全還原。');
+      memories[id] = list as {id:string;caption:string}[];
+    }
     const oldLocation = new Map(currentTrip.days.flatMap(d => d.stops.map(s => [s.id,d.date] as const)));
     const moved = validated.data.days.flatMap(d => d.stops.filter(s => oldLocation.has(s.id) && oldLocation.get(s.id)!==d.date)).length;
     const newIds = [...incoming].filter(id => !currentIds.has(id)).length;
     const removed = [...currentIds].filter(id => !incoming.has(id)).length;
-    setImportPreview({data:validated.data,refs,summary:`移動 ${moved} 個 · 新增 ${newIds} 個 · 移除 ${removed} 個活動。${fullBackup ? '含照片參照備份（不包含照片檔案）。' : '現有照片參照將保留。'}`});
+    setImportPreview({data:validated.data,refs,memories,summary:`移動 ${moved} 個 · 新增 ${newIds} 個 · 移除 ${removed} 個活動。${fullBackup ? '含照片參照備份（不包含照片檔案）。' : '現有照片參照將保留。'}`});
     setJsonError(null);
   };
   const handleApplyJson = () => {
@@ -153,7 +163,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   };
   const confirmImport = () => {
     if (!importPreview) return;
-    onApplyItinerary(importPreview.data, importPreview.refs);
+    onApplyItinerary(importPreview.data, importPreview.refs, importPreview.memories);
     setImportPreview(null);
     onClose();
   };
@@ -194,7 +204,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   const handleDownloadFullBackup = () => {
     const payload = {
       format: 'waybook-full-backup-v1', exportedAt: new Date().toISOString(),
-      itinerary: currentTrip, galleries: cloudGalleryReferences,
+      itinerary: currentTrip, galleries: cloudGalleryReferences, memoryGalleries: cloudMemoryReferences,
       note: 'Gallery values are Google Drive file IDs. Actual photo bytes are NOT included. Keep the Waybook Drive folder backed up separately.'
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});

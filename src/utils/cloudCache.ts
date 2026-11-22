@@ -48,7 +48,7 @@ export async function readPublishedCache(): Promise<{snapshot: CloudSnapshot; ph
   if (!raw || typeof raw !== 'object') return null;
   const snapshot = raw as CloudSnapshot;
   if (typeof snapshot.updatedAt !== 'string' || !snapshot.itinerary || !snapshot.galleries) return null;
-  const ids = [...new Set(Object.values(snapshot.galleries).flat())];
+  const ids = [...new Set([...Object.values(snapshot.galleries).flat(), ...Object.values(snapshot.memoryGalleries || {}).flat().map(item=>item.id)])];
   const values = await readKeys(ids.map(id => `photo:${id}`));
   const photos: Record<string, string> = {};
   ids.forEach((id, i) => {
