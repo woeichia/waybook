@@ -20,7 +20,9 @@ interface ShareImportSheetProps {
   isOpen: boolean;
   currentTrip: ItineraryData;
   onClose: () => void;
-  onApplyItinerary: (data: ItineraryData) => void;
+  onApplyItinerary: (data: ItineraryData, galleryReferences?: Record<string, string[]>) => void;
+  cloudGalleryReferences?: Record<string, string[]>;
+  galleryEventIds?: string[];
   readOnly?: boolean;
 }
 
@@ -37,6 +39,8 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   currentTrip,
   onClose,
   onApplyItinerary,
+  cloudGalleryReferences = {},
+  galleryEventIds = [],
   readOnly = false,
 }) => {
   const [activeTab, setActiveTab] = useState<SheetTab>('share');
@@ -46,6 +50,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
 
   const [jsonInput, setJsonInput] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [importPreview, setImportPreview] = useState<{data: ItineraryData; refs?: Record<string,string[]>; summary: string} | null>(null);
   const [copiedState, setCopiedState] = useState<'json' | 'link' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +58,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
     if (isOpen) {
       setJsonInput(JSON.stringify(currentTrip, null, 2));
       setJsonError(null);
+      setImportPreview(null);
       setAiError(null);
     }
   }, [isOpen, currentTrip]);
@@ -107,46 +113,63 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
     }
   };
 
+  const previewJsonImport = (text: string) => {
+    const parsed = JSON.parse(text) as unknown;
+    const object = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+    const fullBackup = object?.format === 'waybook-full-backup-v1';
+    const candidate = fullBackup ? object?.itinerary : parsed;
+    const validated = validateItineraryData(candidate);
+    if (!validated.ok) throw new Error(validated.error);
+    const rawDays = (candidate as ItineraryData).days;
+    const rawIds = rawDays.flatMap(d => d.stops.map(s => s.id));
+    if (rawIds.some(id => typeof id !== 'string' || !id.trim())) throw new Error('每個活動都必須保留原本的 ID。');
+    if (new Set(rawIds).size !== rawIds.length) throw new Error('匯入檔案有重複活動 ID，請先修正。');
+    const incoming = new Set(rawIds);
+    const currentIds = new Set(currentTrip.days.flatMap(d => d.stops.map(s => s.id)));
+    const existingGalleryIds = new Set([...Object.keys(cloudGalleryReferences), ...galleryEventIds]);
+    const detached = [...existingGalleryIds].filter(id => currentIds.has(id) && !incoming.has(id));
+    if (detached.length) throw new Error(`停止匯入：${detached.length} 個有照片的活動 ID 消失，會造成照片失去連結。請保留原 ID，或先移動活動。`);
+    const refsRaw = fullBackup && object?.galleries && typeof object.galleries === 'object' ? object.galleries as Record<string, unknown> : undefined;
+    const refs: Record<string,string[]> | undefined = refsRaw ? {} : undefined;
+    if (refs && refsRaw) for (const [id, list] of Object.entries(refsRaw)) {
+      if (!incoming.has(id) || !Array.isArray(list) || list.some(value => typeof value !== 'string' || !/^[A-Za-z0-9_-]{10,120}$/.test(value)) || list.length > 8) {
+        throw new Error('完整備份的照片參照不正確，無法安全還原。');
+      }
+      refs[id] = list as string[];
+    }
+    const oldLocation = new Map(currentTrip.days.flatMap(d => d.stops.map(s => [s.id,d.date] as const)));
+    const moved = validated.data.days.flatMap(d => d.stops.filter(s => oldLocation.has(s.id) && oldLocation.get(s.id)!==d.date)).length;
+    const newIds = [...incoming].filter(id => !currentIds.has(id)).length;
+    const removed = [...currentIds].filter(id => !incoming.has(id)).length;
+    setImportPreview({data:validated.data,refs,summary:`移動 ${moved} 個 · 新增 ${newIds} 個 · 移除 ${removed} 個活動。${fullBackup ? '含照片參照備份（不包含照片檔案）。' : '現有照片參照將保留。'}`});
+    setJsonError(null);
+  };
   const handleApplyJson = () => {
     if (readOnly) return;
     setJsonError(null);
-    try {
-      const parsed = JSON.parse(jsonInput);
-      const validated = validateItineraryData(parsed);
-      if (!validated.ok) {
-        setJsonError(validated.error);
-        return;
-      }
-      onApplyItinerary(validated.data);
-      onClose();
-    } catch {
-      setJsonError('Invalid JSON syntax. Please check brackets, quotes, and commas.');
-    }
+    setImportPreview(null);
+    try { previewJsonImport(jsonInput); }
+    catch (error) { setJsonError(error instanceof Error ? error.message : 'JSON 格式不正確。'); }
   };
-
+  const confirmImport = () => {
+    if (!importPreview) return;
+    onApplyItinerary(importPreview.data, importPreview.refs);
+    setImportPreview(null);
+    onClose();
+  };
   const handleUploadJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (readOnly) return;
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
-      setJsonInput(text);
-      const parsed = JSON.parse(text);
-      const validated = validateItineraryData(parsed);
-      if (!validated.ok) {
-        setJsonError(validated.error);
-        return;
-      }
-      setJsonError(null);
-      onApplyItinerary(validated.data);
-      onClose();
-    } catch {
-      setJsonError('Could not read a valid itinerary JSON file.');
-    } finally {
-      e.target.value = '';
-    }
+      const content = await file.text();
+      setJsonInput(content);
+      setImportPreview(null);
+      previewJsonImport(content);
+    } catch(error) {
+      setJsonError(error instanceof Error ? error.message : '無法讀取 JSON 檔案。');
+    } finally { e.target.value = ''; }
   };
-
   const handleCopyJson = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(currentTrip, null, 2));
@@ -168,6 +191,18 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadFullBackup = () => {
+    const payload = {
+      format: 'waybook-full-backup-v1', exportedAt: new Date().toISOString(),
+      itinerary: currentTrip, galleries: cloudGalleryReferences,
+      note: 'Gallery values are Google Drive file IDs. Actual photo bytes are NOT included. Keep the Waybook Drive folder backed up separately.'
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `waybook-full-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   const handleCopyShareLink = async () => {
     try {
       const shareUrl = buildShareUrl(currentTrip);
@@ -354,6 +389,10 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
                     <Download className="w-3.5 h-3.5" />
                     <span>Export</span>
                   </button>
+                  <button type="button" onClick={handleDownloadFullBackup}
+                    className="min-h-[38px] inline-flex items-center gap-1.5 rounded-full bg-[#E8ECFA] border border-black/[0.08] px-3 py-1.5 text-xs font-medium text-[#1F3FB0]">
+                    <Download className="w-3.5 h-3.5"/><span>Full Backup + Photo References</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -384,7 +423,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
               <textarea
                 rows={9}
                 value={jsonInput}
-                onChange={(e) => setJsonInput(e.target.value)}
+                onChange={(e) => {setJsonInput(e.target.value);setImportPreview(null);}}
                 spellCheck={false}
                 aria-label="Itinerary JSON editor"
                 className="w-full rounded-2xl border border-black/10 bg-[#EDEBE6] p-3.5 font-mono text-[11px] leading-relaxed text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#1F3FB0]"
@@ -396,6 +435,12 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
                 </div>
               )}
 
+              <p className="text-xs text-[#68635C]">Export = 行程 JSON；Full Backup = 行程 + Google Drive 照片 ID（不包含相片檔案）。匯入先預覽，確認後才套用；照片活動 ID 遺失會阻止匯入。</p>
+              {importPreview && <div className="rounded-xl border border-[#1F3FB0]/25 bg-[#E8ECFA] p-3 space-y-2">
+                <p className="text-sm font-semibold">匯入預覽（尚未變更行程）</p>
+                <p className="text-xs">{importPreview.summary}</p>
+                <div className="flex gap-2"><button type="button" onClick={confirmImport} className="rounded-full bg-[#1F3FB0] text-white px-4 py-2 text-xs">確認套用</button><button type="button" onClick={() => setImportPreview(null)} className="rounded-full bg-white px-4 py-2 text-xs">取消</button></div>
+              </div>}
               <button
                 type="button"
                 onClick={handleApplyJson}

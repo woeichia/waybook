@@ -8,6 +8,8 @@ interface Props {
   dayIndex: number;
   onChange: (data: ItineraryData) => void;
   onPhoto: (id: string, dataUrl: string) => Promise<boolean>;
+  onCopyEventPhotos?: (sourceId: string, newId: string) => void;
+  photoEventIds?: string[];
   onClose: () => void;
 }
 const inputClass = 'w-full min-h-10 px-3 py-2 rounded-xl bg-white ring-1 ring-black/10 text-sm text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#1F3FB0]';
@@ -16,12 +18,14 @@ function Field({ label, value, onChange, rows }: { label: string; value: string;
     {rows ? <textarea className={`${inputClass} mt-1 resize-y`} rows={rows} value={value} onChange={e => onChange(e.target.value)} /> : <input className={`${inputClass} mt-1`} value={value} onChange={e => onChange(e.target.value)} />}
   </label>;
 }
-export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onClose }: Props) {
+export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEventPhotos, photoEventIds = [], onClose }: Props) {
   const day = data.days[dayIndex];
   const [expanded, setExpanded] = useState<string | null>(null);
   const [status, setStatus] = useState('');
   const photoRef = useRef<HTMLInputElement>(null);
   const [photoStop, setPhotoStop] = useState<string | null>(null);
+  const [transfer, setTransfer] = useState<{id: string; mode: "move" | "copy"} | null>(null);
+  const [destinationDay, setDestinationDay] = useState(0);
   if (!day) return null;
   const updateDay = (patch: Partial<ItineraryDay>) => {
     onChange({ ...data, days: data.days.map((d, i) => i === dayIndex ? { ...d, ...patch } : d) });
@@ -38,6 +42,25 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onClose }: 
     const stops = [...day.stops];
     [stops[index], stops[dest]] = [stops[dest], stops[index]];
     updateDay({ stops });
+  };
+  const transferEvent = () => {
+    if (!transfer || destinationDay === dayIndex || !data.days[destinationDay]) return;
+    const event = day.stops.find(stop => stop.id === transfer.id);
+    if (!event) return;
+    const isCopy = transfer.mode === 'copy';
+    const eventId = isCopy ? `stop-${crypto.randomUUID()}` : event.id;
+    const copy: ItineraryStop = { ...event, id: eventId };
+    const days = data.days.map((item, index) => {
+      if (index === dayIndex && !isCopy) return { ...item, stops: item.stops.filter(s => s.id !== event.id) };
+      if (index === destinationDay) return { ...item, stops: [...item.stops, copy] };
+      return item;
+    });
+    // Save original gallery against its stable ID on a move; on copy, duplicate the
+    // image references without changing the original event or creating a new upload.
+    if (isCopy) onCopyEventPhotos?.(event.id, eventId);
+    onChange({ ...data, days });
+    setStatus(`${isCopy ? '已複製' : '已移動'}「${event.title}」至 ${data.days[destinationDay].date}`);
+    setTransfer(null);
   };
   const photoChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -80,10 +103,22 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onClose }: 
         <Field label="前往下一站交通說明" value={stop.transitToNext} onChange={v => updateStop(stop.id, { transitToNext: v })}/>
         <Field label="圖片網址 (可貼入 HTTPS 連結)" value={stop.image} onChange={v => updateStop(stop.id, { image: v })}/>
         <div className="flex flex-wrap gap-2"><button type="button" onClick={() => {setPhotoStop(stop.id);photoRef.current?.click();}} className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0] flex items-center gap-1"><Camera size={15}/>上傳本機照片</button>
-        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#EEEDE8] flex items-center gap-1" onClick={() => {const id = `stop-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;const stops = [...day.stops];stops.splice(index + 1,0,{...stop,id});updateDay({stops});setExpanded(id);}}><CopyPlus size={15}/>複製</button>
-        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-red-50 text-red-700 flex items-center gap-1" onClick={() => {if(window.confirm(`確定刪除「${stop.title}」？`)){updateDay({stops:day.stops.filter(s=>s.id!==stop.id)});setExpanded(null);}}}><Trash2 size={15}/>刪除</button></div>
+        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#EEEDE8] flex items-center gap-1" onClick={() => {const id = `stop-${crypto.randomUUID()}`;const stops = [...day.stops];stops.splice(index + 1,0,{...stop,id});onCopyEventPhotos?.(stop.id,id);updateDay({stops});setExpanded(id);}}><CopyPlus size={15}/>複製到本日</button>
+        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0]" onClick={() => {setTransfer({id:stop.id,mode:'move'});setDestinationDay(dayIndex===data.days.length-1?0:dayIndex+1);}}>移動到另一天</button>
+        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0]" onClick={() => {setTransfer({id:stop.id,mode:'copy'});setDestinationDay(dayIndex===data.days.length-1?0:dayIndex+1);}}>複製到另一天</button>
+        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-red-50 text-red-700 flex items-center gap-1" onClick={() => {if(window.confirm(photoEventIds.includes(stop.id) ? `「${stop.title}」已有照片。刪除活動會令照片與行程失去連結。建議先匯出完整備份，確定仍要刪除？` : `確定刪除「${stop.title}」？`)){updateDay({stops:day.stops.filter(s=>s.id!==stop.id)});setExpanded(null);}}}><Trash2 size={15}/>刪除</button></div>
       </div>}
     </div>)}</div>
+    {transfer && <div className="mt-4 rounded-2xl bg-white p-3 ring-1 ring-[#1F3FB0]/25 space-y-3" role="group" aria-label="移動或複製活動">
+      <p className="text-sm font-semibold">{transfer.mode === 'move' ? '移動活動至其他日期' : '複製活動至其他日期'}</p>
+      <label className="text-xs block">目標日期
+        <select className={`${inputClass} mt-1`} value={destinationDay} onChange={e => setDestinationDay(Number(e.target.value))}>
+          {data.days.map((d,i) => <option key={`${d.date}-${i}`} value={i} disabled={i===dayIndex}>{d.date} · {d.title}</option>)}
+        </select>
+      </label>
+      <p className="text-xs text-[#68635C]">{transfer.mode === 'move' ? '活動及照片將保留同一個 ID，並從原日期移除。' : '建立新的活動 ID；原活動不受影響，照片參照會複製。'}</p>
+      <div className="flex gap-2"><button type="button" disabled={destinationDay===dayIndex} className="rounded-full bg-[#1F3FB0] text-white px-4 py-2 text-xs disabled:opacity-40" onClick={transferEvent}>確認</button><button type="button" className="rounded-full bg-[#EEEDE8] px-4 py-2 text-xs" onClick={() => setTransfer(null)}>取消</button></div>
+    </div>}
     {status && <p role="status" className="text-xs mt-3 text-[#1F3FB0]">{status}</p>}
     <div className="mt-4 flex items-center justify-between gap-2"><span className="text-[11px] text-[#68635C]">修改自動儲存，分享前請匯出新版本。</span><button onClick={onClose} className="rounded-full text-white bg-[#1A1A1A] px-3 py-2 flex gap-1 items-center text-xs"><Check size={14}/>完成</button></div>
   </section>;

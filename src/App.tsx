@@ -106,6 +106,7 @@ export default function App() {
   const photoCacheRef = React.useRef<Record<string, string>>({});
   const lastBackgroundCheckRef = React.useRef(0);
   const cloudRequestRef = React.useRef(false);
+  const editedGalleryIdsRef = React.useRef(new Set<string>());
 
   const isOnline = useOnlineStatus();
   const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline, itinerary.days[selectedDayIndex]?.date);
@@ -284,13 +285,22 @@ export default function App() {
     if (!window.confirm('發佈後家人的手機將看到這份行程和相片。確定發佈？')) return;
     setCloudBusy(true);
     try {
+      const activeStopIds = new Set(itinerary.days.flatMap(day => day.stops.map(stop => stop.id)));
       const remote: Record<string,string[]> = {};
+      // Retain existing cloud refs unless the admin explicitly edited this gallery.
+      // A partially cached photo list must NEVER delete Drive references on publish.
+      for (const [stopId, refs] of Object.entries(cloudPhotoIds)) {
+        if (activeStopIds.has(stopId) && !editedGalleryIdsRef.current.has(stopId)) remote[stopId] = [...refs];
+      }
       for (const [stopId, photos] of Object.entries(photoGalleries)) {
-        if (!photos.length) continue;
+        if (!activeStopIds.has(stopId) || (!editedGalleryIdsRef.current.has(stopId) && cloudPhotoIds[stopId])) continue;
+        if (!photos.length) {delete remote[stopId]; continue;}
         remote[stopId] = [];
         for (const dataUrl of photos) {
           // Reuse unchanged cloud files; don't duplicate every photo on each publish.
           let photoId = (cloudPhotoIds[stopId] || []).find(id => cloudPhotoData[id] === dataUrl);
+          // A copied event may reuse an image already uploaded under another stop.
+          if (!photoId) photoId = Object.keys(cloudPhotoData).find(id => cloudPhotoData[id] === dataUrl);
           if (!photoId) {
             if (!dataUrl.startsWith('data:image/')) throw new Error('相片需要重新上傳，請使用上傳照片功能。');
             setCloudStatus(`正在上傳 ${stopId} 的照片…`);
@@ -305,8 +315,12 @@ export default function App() {
       setCloudUpdatedAt(result.updatedAt); setCloudPhotoIds(remote);
       latestCloudVersionRef.current = result.updatedAt;
       unpublishedEditsRef.current = false;
+      editedGalleryIdsRef.current.clear();
       const nextData = {...cloudPhotoData};
-      for (const [stopId, ids] of Object.entries(remote)) ids.forEach((id, i) => {nextData[id] = photoGalleries[stopId][i]});
+      for (const [stopId, ids] of Object.entries(remote)) ids.forEach((id, i) => {
+        const photo = photoGalleries[stopId]?.[i];
+        if (photo) nextData[id] = photo;
+      });
       photoCacheRef.current = nextData;
       setCloudPhotoData(nextData);
       // Save newly published state for the administrator's own next launch too.
@@ -317,16 +331,57 @@ export default function App() {
     finally { setCloudBusy(false); }
   };
 
+  const handleCopyEventPhotos = (sourceId: string, newId: string) => {
+    const originals = photoGalleries[sourceId] || [];
+    const refs = cloudPhotoIds[sourceId] || [];
+    if (!originals.length && !refs.length) return;
+    // Copies share existing media file IDs without re-uploading. Even if the phone
+    // has only partially downloaded a gallery, the cloud references remain intact.
+    if (refs.length) setCloudPhotoIds(current => ({...current,[newId]:[...refs]}));
+    else editedGalleryIdsRef.current.add(newId);
+    if (originals.length) setPhotoGalleries(current => ({ ...current, [newId]: [...originals] }));
+    unpublishedEditsRef.current = true;
+  };
   const handleSaveGallery = async (stopId: string, photos: string[]) => {
     if (!isAdmin) throw new Error('只有管理員可以修改照片');
     unpublishedEditsRef.current = true;
+    editedGalleryIdsRef.current.add(stopId);
     await writeGallery(stopId, photos);
     setPhotoGalleries(current => ({ ...current, [stopId]: photos }));
   };
 
-  const handleApplyItinerary = (nextData: ItineraryData) => {
+  const handleApplyItinerary = (nextData: ItineraryData, backupGalleryRefs?: Record<string,string[]>) => {
     if (!isAdmin) { setCloudStatus('請先以管理員身分登入後再匯入行程。'); return; }
     unpublishedEditsRef.current = true;
+    if (backupGalleryRefs) {
+      // Restore references for events with no current media; never replace working
+      // local photos or mappings supplied by the currently published snapshot.
+      const additions: Record<string,string[]> = {};
+      for (const [id, refs] of Object.entries(backupGalleryRefs)) {
+        if (!cloudPhotoIds[id]?.length && refs.length) additions[id] = refs;
+      }
+      if (Object.keys(additions).length) {
+        setCloudPhotoIds(current => ({...current, ...additions}));
+        void (async () => {
+          const additionalPhotos: Record<string,string> = {};
+          for (const id of [...new Set(Object.values(additions).flat())]) {
+            if (photoCacheRef.current[id]) continue;
+            try {additionalPhotos[id] = await loadCloudPhoto(id); }
+            catch { /* Keep original photos if references cannot be restored. */ }
+          }
+          const nextPhotos = {...photoCacheRef.current, ...additionalPhotos};
+          photoCacheRef.current = nextPhotos;
+          setCloudPhotoData(nextPhotos);
+          setPhotoGalleries(current => {
+            const merged = {...current};
+            for (const [stopId, refs] of Object.entries(additions)) {
+              if (!merged[stopId]?.length) merged[stopId] = refs.map(id => nextPhotos[id]).filter(Boolean);
+            }
+            return merged;
+          });
+        })();
+      }
+    }
     setItinerary(nextData);
     setDayDirection(1);
     setSelectedDayIndex(0);
@@ -398,7 +453,9 @@ export default function App() {
                 <Pencil className="w-3.5 h-3.5" /> {isEditOpen ? '關閉編輯' : '編輯行程'}
               </button>
             </div>}
-            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
+            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos}
+               photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length)])]}
+               onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
             <div className="mt-5">
@@ -474,6 +531,8 @@ export default function App() {
           currentTrip={itinerary}
           onClose={() => setIsShareOpen(false)}
           onApplyItinerary={handleApplyItinerary}
+          cloudGalleryReferences={cloudPhotoIds}
+          galleryEventIds={Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length)}
           readOnly={!isAdmin}
         />
       </div>
