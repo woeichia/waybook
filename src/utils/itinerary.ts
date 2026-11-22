@@ -97,6 +97,14 @@ export function validateItineraryData(raw: unknown): { ok: true; data: Itinerary
         locationName,
         mapQuery,
         transitToNext: typeof s.transitToNext === 'string' ? s.transitToNext.trim() : '',
+        schedule: s.schedule && typeof s.schedule === 'object' ? (() => {
+          const x = s.schedule as Record<string, unknown>;
+          return {
+            durationMinutes: typeof x.durationMinutes === 'number' && Number.isFinite(x.durationMinutes) && x.durationMinutes > 0 && x.durationMinutes <= 1440 ? Math.round(x.durationMinutes) : undefined,
+            travelFromPreviousMinutes: typeof x.travelFromPreviousMinutes === 'number' && Number.isFinite(x.travelFromPreviousMinutes) && x.travelFromPreviousMinutes >= 0 && x.travelFromPreviousMinutes <= 1440 ? Math.round(x.travelFromPreviousMinutes) : undefined,
+            fixedStart: x.fixedStart === true,
+          };
+        })() : undefined,
       };
     });
 

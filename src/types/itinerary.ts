@@ -12,6 +12,8 @@ export interface ItineraryStop {
   locationName: string;
   mapQuery: string;
   transitToNext: string;
+  /** Optional validated manual scheduling inputs; not routing API durations. */
+  schedule?: { durationMinutes?: number; travelFromPreviousMinutes?: number; fixedStart?: boolean };
 }
 
 export interface ItineraryDay {
