@@ -30,6 +30,10 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullView] = useState(false);
+  const fullViewRef = useRef(false);
+  fullViewRef.current = fullView;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   const images = stop ? [...gallery, ...(gallery.length === 0 && stop.image ? [stop.image] : []), ...(stop.images ?? [])].slice(0, MAX_PHOTOS_PER_STOP) : [];
   const localImageCount = gallery.length;
@@ -44,7 +48,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   useEffect(() => {
     if (!stop) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { if (fullView) setFullView(false); else onClose(); }
+      if (event.key === 'Escape') { if (document.querySelector('[data-waybook-video-viewer], [data-waybook-memory-photo-viewer]')) return; if (fullView) setFullView(false); else onClose(); }
       if (fullView && event.key === 'ArrowRight') {
         setPosition((p) => {
           const next = Math.min(imageCount - 1, p + 1);
@@ -63,6 +67,17 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [stop, onClose, fullView, imageCount, onGalleryTick]);
+
+  useEffect(() => {
+    if (!stop) return;
+    const back = () => {
+      if (document.querySelector('[data-waybook-video-viewer], [data-waybook-memory-photo-viewer]')) return;
+      if (fullViewRef.current) setFullView(false);
+      else onCloseRef.current();
+    };
+    window.addEventListener('waybook:back', back);
+    return () => window.removeEventListener('waybook:back', back);
+  }, [stop?.id]);
 
   const goTo = (next: number) => {
     const n = Math.min(Math.max(next, 0), imageCount - 1);
@@ -99,7 +114,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   };
 
   return <AnimatePresence>
-    {stop && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
+    {stop && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={onClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
       <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}} transition={{duration:0.22}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e=>e.stopPropagation()}>
         <div className="relative shrink-0 bg-[#E5E2DC]">
           <div ref={scrollRef} className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none" style={{scrollbarWidth:'none'}} onScroll={e=>{const el=e.currentTarget; setPosition(Math.min(imageCount-1,Math.max(0,Math.round(el.scrollLeft/Math.max(1,el.clientWidth)))));}}>
@@ -139,7 +154,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           </div>
         </div>
       </motion.div>
-      {fullView && imageCount>0 && <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="完整照片">
+      {fullView && imageCount>0 && <div data-waybook-ref-photo-viewer className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="完整照片">
         <button type="button" onClick={()=>setFullView(false)} aria-label="關閉照片" className="absolute top-5 right-5 text-white bg-white/20 rounded-full p-3"><X className="w-6 h-6"/></button>
         <img src={images[position]} alt={`${stop.title} 完整照片 ${position+1}`} className="max-w-full max-h-[78vh] object-contain"/>
         <div className="mt-5 flex gap-5 items-center text-white"><button data-sound-control aria-label="上一張照片" disabled={position===0} onClick={()=>goTo(position-1)} className="p-2 disabled:opacity-30"><ArrowLeft/></button><span className="text-sm">{position+1} / {imageCount}</span><button data-sound-control aria-label="下一張照片" disabled={position===imageCount-1} onClick={()=>goTo(position+1)} className="p-2 disabled:opacity-30"><ArrowRight/></button></div>

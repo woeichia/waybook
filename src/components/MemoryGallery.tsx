@@ -31,6 +31,14 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<number|null>(null);
   const [active,setActive]=useState(0);
+  useEffect(()=>{
+    if(selected===null) return;
+    const back=()=>{onSound?.('tap');setSelected(null);};
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.stopImmediatePropagation();back();}};
+    window.addEventListener('waybook:back',back);
+    window.addEventListener('keydown',key,true);
+    return ()=>{window.removeEventListener('waybook:back',back);window.removeEventListener('keydown',key,true);};
+  },[selected,onSound]);
 
   useEffect(()=>{
     if(active>Math.max(photos.length-1,0)) setActive(Math.max(photos.length-1,0));
@@ -248,7 +256,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
     </>}
     {error&&<p role="alert" className="text-red-700 text-xs">{error}</p>}
 
-    {selected!==null && photos[selected]?.src && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={()=>{onSound?.('tap');setSelected(null);}}>
+    {selected!==null && photos[selected]?.src && <div data-waybook-memory-photo-viewer role="dialog" aria-modal="true" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={()=>{onSound?.('tap');setSelected(null);}}>
       <button aria-label="關閉回憶照片" className="absolute top-5 right-5 text-white p-2 bg-white/20 rounded-full" onClick={e=>{e.stopPropagation();onSound?.('tap');setSelected(null);}}>✕</button>
       <img className="max-w-full max-h-[75vh] object-contain" src={photos[selected].src} alt={photos[selected].caption||'旅途回憶'}/>
       <p className="text-white text-sm mt-4 text-center max-w-xl">{photos[selected].caption || '旅途回憶'}</p>
