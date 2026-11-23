@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { WifiOff, Pencil } from 'lucide-react';
-import { playUiSound, readSoundEnabled, storeSoundEnabled } from './utils/uiSounds';
+import { playUiSound, readSoundEnabled, storeSoundEnabled, type UiSoundKind } from './utils/uiSounds';
 import { CloudPanel } from './components/CloudPanel';
 import type { RoutePlanResponse } from './utils/routePlanning';
 import { GOOGLE_CLIENT_ID, cloudRead, cloudWrite, getGoogleIdToken, loadCloudPhoto, type CloudSnapshot, hasCloudConfiguration } from './utils/driveCloud';
@@ -616,6 +616,7 @@ export default function App() {
           onGalleryTick={() => {
             void playUiSound('slide', soundEnabled);
           }}
+          onMemorySound={(kind: UiSoundKind) => { void playUiSound(kind, soundEnabled); }}
           readOnly={!isAdmin}
           onClose={closePostcard}
         />

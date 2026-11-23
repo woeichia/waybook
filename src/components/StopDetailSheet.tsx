@@ -8,6 +8,7 @@ import { MAX_PHOTOS_PER_STOP } from '../utils/photoGallery';
 import { CategoryBadge } from './CategoryBadge';
 import { SmartImage } from './SmartImage';
 import { MemoryGallery, type MemoryPhoto } from './MemoryGallery';
+import type { UiSoundKind } from '../utils/uiSounds';
 
 interface StopDetailSheetProps {
   stop: ItineraryStop | null;
@@ -16,11 +17,12 @@ interface StopDetailSheetProps {
   onSaveMemories: (stopId:string, photos:MemoryPhoto[])=>Promise<void>;
   onSaveGallery: (stopId: string, photos: string[]) => Promise<void>;
   onGalleryTick?: () => void;
+  onMemorySound?: (kind: UiSoundKind) => void;
   onClose: () => void;
   readOnly?: boolean;
 }
 
-export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onClose, readOnly = false }) => {
+export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onMemorySound, onClose, readOnly = false }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(0);
@@ -119,7 +121,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <div className="mt-2 flex gap-1.5 text-xs text-[#5E5A52]"><MapPin className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.locationName}</div>
           {stop.description && <p className="mt-4 text-sm leading-relaxed text-[#3F3D38]">{stop.description}</p>}
           {stop.transitToNext.trim() && <div className="mt-4 rounded-xl bg-[#EDEBE6] p-3 flex gap-2 text-xs text-[#5E5A52]"><Navigation className="w-4 h-4 text-[#1F3FB0] shrink-0"/>前往下一站：{stop.transitToNext}</div>}
-          <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly}/>
+          <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>
             <div className="flex items-center justify-between"><h4 className="font-semibold text-sm">行程參考照片</h4><span className="text-xs text-[#5E5A52]">本機上傳 {localImageCount}/{MAX_PHOTOS_PER_STOP}</span></div>
