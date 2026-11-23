@@ -79,8 +79,8 @@ export async function playUiSound(
     switch (kind) {
       case 'tap':
         // Quiet paper contact, warmer and less sharp than the previous button click.
-        paper(ctx,{start:0,duration:0.045,volume:0.035,filterFrom:1350,filterTo:550});
-        tone(ctx,{start:0,duration:0.045,from:340,to:220,volume:0.035,wave:'sine'});
+        paper(ctx,{start:0,duration:0.050,volume:0.065,filterFrom:2100,filterTo:750});
+        tone(ctx,{start:0,duration:0.058,from:520,to:310,volume:0.095,wave:'triangle'});
         break;
       case 'navigate':
         // The recognizable two-note day-navigation signal, at reduced volume.
@@ -89,17 +89,17 @@ export async function playUiSound(
         break;
       case 'slide':
         // Light paper swish for photo movement and gallery navigation.
-        paper(ctx,{start:0,duration:0.09,volume:0.026,filterFrom:2000,filterTo:680});
+        paper(ctx,{start:0,duration:0.115,volume:0.055,filterFrom:2400,filterTo:780});
         break;
       case 'pickup':
         // A tiny tactile lift / flick when the centered memory frame settles.
-        paper(ctx,{start:0,duration:0.065,volume:0.028,filterFrom:750,filterTo:1900});
-        tone(ctx,{start:0.008,duration:0.055,from:300,to:430,volume:0.038,wave:'sine'});
+        paper(ctx,{start:0,duration:0.072,volume:0.048,filterFrom:1100,filterTo:2400});
+        tone(ctx,{start:0.008,duration:0.073,from:340,to:500,volume:0.065,wave:'sine'});
         break;
       case 'whoosh':
         // Soft airy dissolve for opening a memory in full screen.
-        paper(ctx,{start:0,duration:0.23,volume:0.045,filterFrom:450,filterTo:1700});
-        tone(ctx,{start:0.015,duration:0.19,from:260,to:460,volume:0.019,wave:'sine'});
+        paper(ctx,{start:0,duration:0.23,volume:0.060,filterFrom:500,filterTo:1950});
+        tone(ctx,{start:0.015,duration:0.19,from:260,to:460,volume:0.030,wave:'sine'});
         break;
       case 'confirm':
         // Existing warm confirmation chime.
