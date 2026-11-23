@@ -1,44 +1,17 @@
 import type { ItineraryData } from '../types/itinerary';
+import { familyRead } from './familyAccess';
 
 /** Public cloud snapshots contain only references to image files, not binary images. */
 export type CloudSnapshot = { version: number; updatedAt: string; itinerary: ItineraryData; galleries: Record<string, string[]>; memoryGalleries?: Record<string, {id:string;caption:string}[]> };
 export const CLOUD_URL = (import.meta.env.VITE_WAYBOOK_APPS_SCRIPT_URL || '').trim();
 export const GOOGLE_CLIENT_ID = (import.meta.env.VITE_WAYBOOK_GOOGLE_CLIENT_ID || '').trim();
 
-// Apps Script ContentService redirects do not reliably expose CORS headers. JSONP is used
-// exclusively for public, read-only state and image requests. Never pass credentials to it.
-export function cloudRead<T>(params: Record<string, string>, timeout = 20000): Promise<T> {
-  if (!CLOUD_URL) return Promise.reject(new Error('尚未設定 Apps Script URL'));
-  return new Promise((resolve, reject) => {
-    const name = `__waybook_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const script = document.createElement('script');
-    const root = window as unknown as Record<string, unknown>;
-    const timer = window.setTimeout(() => finish(new Error('Google Drive 讀取逾時')), timeout);
-    function finish(error?: Error, result?: T) {
-      clearTimeout(timer); script.remove(); delete root[name];
-      if (error) reject(error); else resolve(result as T);
-    }
-    root[name] = (data: { ok: boolean; data?: T; error?: string }) => {
-      if (!data?.ok) finish(new Error(data?.error || '雲端讀取失敗'));
-      else finish(undefined, data.data);
-    };
-    script.onerror = () => finish(new Error('無法連接 Apps Script，請檢查部署網址與權限'));
-    const url = new URL(CLOUD_URL);
-    url.searchParams.set('action', params.action || 'snapshot');
-    for (const [key, value] of Object.entries(params)) if (key !== 'action') url.searchParams.set(key, value);
-    url.searchParams.set('callback', name);
-    script.src = url.toString();
-    document.head.appendChild(script);
-  });
+/** All family reads are authenticated POSTs; no password/session token appears in URL. */
+export function cloudRead<T>(params: Record<string, string>, timeout = 30000): Promise<T> {
+  return familyRead<T>(params, timeout);
 }
 
-/**
- * A write is accepted only after the backend confirms the requestId. Google
- * Apps Script can nest HtmlService inside an additional iframe, so the ordinary
- * postMessage is an optimisation, not the sole confirmation mechanism.
- * The fallback queries a short-lived, unguessable receipt via read-only JSONP.
- * Never include the Google ID token in the receipt request or a URL.
- */
+/** Administrator writes retain the existing receipt fallback and Google ID-token checks. */
 export function cloudWrite<T>(action: string, data: unknown, idToken: string): Promise<T> {
   if (!CLOUD_URL) return Promise.reject(new Error('尚未設定 Apps Script URL'));
   if (!globalThis.crypto?.randomUUID) return Promise.reject(new Error('瀏覽器不支援安全請求識別碼'));
@@ -51,14 +24,12 @@ export function cloudWrite<T>(action: string, data: unknown, idToken: string): P
     form.method = 'POST'; form.action = CLOUD_URL; form.target = frame.name;
     const field = document.createElement('input'); field.type = 'hidden'; field.name = 'payload';
     field.value = JSON.stringify({ requestId, action, idToken, data }); form.appendChild(field);
-
     let settled = false;
     let polling = false;
     let pollTimer: number | undefined;
     const timer = window.setTimeout(() => {
       finish(new Error('雲端尚未確認寫入結果。請先檢查 Google Drive，勿立即重複上傳。'));
     }, 90000);
-
     function finish(error?: Error, response?: T) {
       if (settled) return;
       settled = true;
@@ -68,7 +39,6 @@ export function cloudWrite<T>(action: string, data: unknown, idToken: string): P
       window.setTimeout(() => { frame.remove(); form.remove(); }, 100);
       if (error) reject(error); else resolve(response as T);
     }
-
     const onMessage = (event: MessageEvent) => {
       if (!/^https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|google\.com)$/i.test(event.origin)) return;
       const msg = event.data;
@@ -76,35 +46,38 @@ export function cloudWrite<T>(action: string, data: unknown, idToken: string): P
       if (!msg.ok) finish(new Error(msg.error || '雲端寫入失敗'));
       else finish(undefined, msg.data as T);
     };
-
     async function checkReceipt() {
       if (settled || polling) return;
       polling = true;
       try {
-        const receipt = await cloudRead<{ state: 'pending' | 'complete'; ok?: boolean; data?: T; error?: string }>(
-          { action: 'writeReceipt', requestId }, 10000,
-        );
+        // Read-only receipt is an unguessable UUID and contains no family session data.
+        const receipt = await receiptRead<{state:'pending'|'complete';ok?:boolean;data?:T;error?:string}>(requestId);
         if (receipt?.state === 'complete') {
           if (receipt.ok) finish(undefined, receipt.data);
           else finish(new Error(receipt.error || '雲端寫入失敗'));
         }
-      } catch {
-        // Transient failure: leave the POST running; a subsequent poll can recover.
-      } finally {
-        polling = false;
-        if (!settled) pollTimer = window.setTimeout(checkReceipt, 2500);
-      }
+      } catch { /* Ignore transient receipt failure */ }
+      finally {polling=false; if (!settled) pollTimer=window.setTimeout(checkReceipt,2500);}
     }
-
     window.addEventListener('message', onMessage);
-    document.body.appendChild(frame); document.body.appendChild(form);
-    try {
-      form.submit();
-      // Allow the Apps Script invocation to begin before asking for its receipt.
-      pollTimer = window.setTimeout(checkReceipt, 2000);
-    } catch (error) {
-      finish(error instanceof Error ? error : new Error('無法送出雲端寫入請求'));
-    }
+    document.body.append(frame,form);
+    try { form.submit(); pollTimer=window.setTimeout(checkReceipt,2000); }
+    catch (err) { finish(err instanceof Error?err:new Error('無法送出雲端寫入請求')); }
+  });
+}
+
+function receiptRead<T>(requestId: string): Promise<T> {
+  return new Promise((resolve,reject)=>{
+    const callback=`__waybook_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const root=window as unknown as Record<string,unknown>;
+    const script=document.createElement('script');
+    const timer=window.setTimeout(()=>end(new Error('回條逾時')),10000);
+    const end=(error?:Error,value?:T)=>{clearTimeout(timer); script.remove();delete root[callback];if(error)reject(error);else resolve(value as T);};
+    root[callback]=(response:{ok:boolean;data?:T;error?:string})=>response?.ok?end(undefined,response.data):end(new Error(response?.error||'回條讀取失敗'));
+    script.onerror=()=>end(new Error('網路暫時無法讀取回條'));
+    const url=new URL(CLOUD_URL);
+    url.searchParams.set('action','writeReceipt');url.searchParams.set('requestId',requestId);url.searchParams.set('callback',callback);
+    script.src=url.toString();document.head.appendChild(script);
   });
 }
 
