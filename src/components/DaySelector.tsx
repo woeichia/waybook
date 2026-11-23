@@ -39,47 +39,72 @@ export const DaySelector: React.FC<DaySelectorProps> = ({
   currentDayRef.current = selectedDayIndex;
   const selectDayRef = useRef(onSelectDay);
   selectDayRef.current = onSelectDay;
-  const lastRootBackRef = useRef(0);
   const [backHint, setBackHint] = useState('');
 
-  // Android PWA Back gestures use browser history. Keep one cancellable in-app
-  // entry so Back closes a viewer or returns to the preceding day first.
-  // A second Back within 2 seconds at Day 1 is allowed to leave the PWA.
+  // Chrome on Android can ignore a history entry created without a user gesture.
+  // Therefore, create navigation entries from actual user clicks (event/day/media).
+  // Do not trap Back with a perpetual synthetic history entry at app start.
   useEffect(() => {
-    window.history.pushState({waybookNavigationGuard:true}, '', window.location.href);
-    const onBack = () => {
-      const mediaOpen = Boolean(document.querySelector('[data-waybook-video-viewer], [data-waybook-memory-photo-viewer], [data-waybook-ref-photo-viewer]'));
-      const eventOpen = Boolean(document.querySelector('[data-waybook-event-viewer]'));
-      if(mediaOpen || eventOpen) {
-        window.dispatchEvent(new Event('waybook:back'));
-        window.history.pushState({waybookNavigationGuard:true}, '', window.location.href);
+    const state = window.history.state;
+    if (!state?.waybookNav) {
+      window.history.replaceState({ ...(state && typeof state === 'object' ? state : {}), waybookNav: true, day: currentDayRef.current, layer: 'day' }, '', window.location.href);
+    }
+
+    const onClickCapture = (e: MouseEvent) => {
+      const el = e.target instanceof Element ? e.target : null;
+      const button = el?.closest<HTMLButtonElement>('button');
+      if (!button || button.disabled) return;
+
+      // User tapped a different day: add a real browser-history entry.
+      const dayButton = button.closest<HTMLButtonElement>('[data-waybook-day-index]');
+      if (dayButton) {
+        const day = Number(dayButton.dataset.waybookDayIndex);
+        if (Number.isInteger(day) && day !== currentDayRef.current) {
+          window.history.pushState({waybookNav:true, day, layer:'day'}, '', window.location.href);
+          setBackHint('');
+        }
         return;
       }
-      if(currentDayRef.current > 0) {
-        selectDayRef.current(currentDayRef.current - 1);
-        window.history.pushState({waybookNavigationGuard:true}, '', window.location.href);
+
+      // Only an attraction's details button (never its Directions link).
+      if (button.closest('[data-waybook-stop-id]')) {
+        window.history.pushState({waybookNav:true, day:currentDayRef.current, layer:'event'}, '', window.location.href);
+        return;
+      }
+
+      const label = (button.getAttribute('aria-label') || button.textContent || '').trim();
+      const inEvent = Boolean(button.closest('[data-waybook-event-viewer]'));
+      if (!inEvent) return;
+
+      // Video/full-photo openers must add a history step as well.
+      if (/放大照片|查看回憶照片|查看大圖|播放短片|全螢幕方式播放/.test(label)) {
+        window.history.pushState({waybookNav:true, day:currentDayRef.current, layer:'media'}, '', window.location.href);
+      }
+    };
+
+    const onBack = (event: PopStateEvent) => {
+      const hasViewer = Boolean(document.querySelector('[data-waybook-video-viewer], [data-waybook-memory-photo-viewer], [data-waybook-ref-photo-viewer]'));
+      const hasEvent = Boolean(document.querySelector('[data-waybook-event-viewer]'));
+      if (hasViewer || hasEvent) {
+        // Child components decide which *single* visible layer to close.
+        window.dispatchEvent(new Event('waybook:back'));
         setBackHint('');
         return;
       }
-      const now=Date.now();
-      if(now - lastRootBackRef.current < 2000) {
-        // A deliberate second Back exits the guard and returns to the OS.
-        // Standalone PWA exit behavior is ultimately controlled by the browser.
-        window.setTimeout(() => window.history.back(), 0);
-        return;
+      const target = event.state;
+      if (target?.waybookNav && Number.isInteger(target.day) && target.day >= 0 && target.day < days.length) {
+        if (target.day !== currentDayRef.current) selectDayRef.current(target.day);
+        setBackHint('');
       }
-      lastRootBackRef.current=now;
-      setBackHint('再按一次返回以離開');
-      window.history.pushState({waybookNavigationGuard:true}, '', window.location.href);
+      // At the root of browser history, Android is allowed to exit naturally.
     };
+    document.addEventListener('click', onClickCapture, true);
     window.addEventListener('popstate', onBack);
-    return ()=>window.removeEventListener('popstate',onBack);
-  }, []);
-
-  useEffect(() => { if (backHint) {
-    const id=window.setTimeout(()=>setBackHint(''),2100);
-    return ()=>window.clearTimeout(id);
-  }},[backHint]);
+    return () => {
+      document.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('popstate', onBack);
+    };
+  }, [days.length]);
 
   useEffect(() => {
     const activeButton = tabRefs.current[selectedDayIndex];
@@ -94,7 +119,6 @@ export const DaySelector: React.FC<DaySelectorProps> = ({
 
   return (
     <section aria-label="Trip days" className="mt-5">
-      {backHint && <div role="status" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[10000] rounded-full bg-[#242424] px-4 py-2 text-white text-xs shadow-xl">{backHint}</div>}
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4">
         {days.map((day, idx) => {
           const isActive = idx === selectedDayIndex;
@@ -103,6 +127,7 @@ export const DaySelector: React.FC<DaySelectorProps> = ({
           return (
             <button
               key={`${day.dayNumber}-${idx}`}
+              data-waybook-day-index={idx}
               ref={(el) => {
                 tabRefs.current[idx] = el;
               }}
