@@ -9,6 +9,7 @@ import { CategoryBadge } from './CategoryBadge';
 import { SmartImage } from './SmartImage';
 import { MemoryGallery, type MemoryPhoto } from './MemoryGallery';
 import { MemoryClipPilot } from './MemoryClipPilot';
+import { DriveVideoUploadPilot } from './DriveVideoUploadPilot';
 import type { UiSoundKind } from '../utils/uiSounds';
 
 interface StopDetailSheetProps {
@@ -139,6 +140,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           {stop.transitToNext.trim() && <div className="mt-4 rounded-xl bg-[#EDEBE6] p-3 flex gap-2 text-xs text-[#5E5A52]"><Navigation className="w-4 h-4 text-[#1F3FB0] shrink-0"/>前往下一站：{stop.transitToNext}</div>}
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           {!readOnly && <MemoryClipPilot stopId={stop.id}/>}
+          {!readOnly && <DriveVideoUploadPilot stopId={stop.id}/>}
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>
             <div className="flex items-center justify-between"><h4 className="font-semibold text-sm">行程參考照片</h4><span className="text-xs text-[#5E5A52]">本機上傳 {localImageCount}/{MAX_PHOTOS_PER_STOP}</span></div>
