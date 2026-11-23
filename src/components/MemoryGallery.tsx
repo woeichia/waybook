@@ -1,7 +1,7 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Camera, Star, Trash2, Images, Loader2, ImageIcon, ChevronLeft, ChevronRight, Expand} from 'lucide-react';
 import {compressImageToDataUrl} from '../utils/customPhotos';
-import type { UiSoundKind } from '../utils/uiSounds';
+import { primeUiAudio, type UiSoundKind } from '../utils/uiSounds';
 
 export type MemoryPhoto = {id?:string;src:string;caption:string};
 const MAX_MEMORIES = 12;
@@ -25,6 +25,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const settledIndexRef=useRef(0);
   const settleTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
   const lastGestureSoundRef=useRef(0);
+  const lastScrollLeftRef=useRef<number|null>(null);
   const soundRef=useRef(onSound);
   soundRef.current=onSound;
   const [busy,setBusy]=useState(false);
@@ -75,7 +76,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const gestureSound = ()=>{
     gestureRef.current=true;
     const now=Date.now();
-    if(now-lastGestureSoundRef.current>220){
+    if(now-lastGestureSoundRef.current>350){
       lastGestureSoundRef.current=now;
       soundRef.current?.('slide');
     }
@@ -96,48 +97,66 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
     scrollToCard(index);
   };
 
+  // Determine the centered card from actual geometry; keep scroll handler stable.
+  // A settled card plays pickup exactly once, including touch inertia and scroll-snap.
   useEffect(()=>{
     const rail = railRef.current;
     if(!rail || photos.length===0) return;
     let raf = 0;
-    const updateActive = ()=>{
-      raf = 0;
+    let initial = true;
+    const centerIndex = () => {
       const rect = rail.getBoundingClientRect();
-      const center = rect.left + rect.width/2;
-      const cards = Array.from(rail.querySelectorAll<HTMLElement>('[data-card-index]'));
-      let best = active;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for(const card of cards){
-        const idx = Number(card.dataset.cardIndex||0);
-        const cardRect = card.getBoundingClientRect();
-        const cardCenter = cardRect.left + cardRect.width/2;
-        const distance = Math.abs(center - cardCenter);
-        if(distance < bestDistance){best = idx;bestDistance = distance;}
+      const center = rect.left + rect.width / 2;
+      let best = 0;
+      let distance = Infinity;
+      for(const card of Array.from(rail.querySelectorAll<HTMLElement>('[data-card-index]'))){
+        const box = card.getBoundingClientRect();
+        const delta = Math.abs((box.left + box.width / 2) - center);
+        if(delta < distance){distance = delta;best = Number(card.dataset.cardIndex || 0);}
       }
-      setActive(current => current===best ? current : best);
-      if(gestureRef.current){
-        if(settleTimerRef.current) clearTimeout(settleTimerRef.current);
-        settleTimerRef.current=setTimeout(()=>{
-          if(best!==settledIndexRef.current){
-            settledIndexRef.current=best;
-            soundRef.current?.('pickup');
-          }
-          gestureRef.current=false;
-        },190);
-      } else {
-        settledIndexRef.current=best;
+      return best;
+    };
+    const update = () => {
+      raf = 0;
+      const index = centerIndex();
+      setActive(current => current === index ? current : index);
+      if (initial) {
+        settledIndexRef.current = index;
+        initial = false;
       }
     };
-    const onScroll = ()=>{ if(!raf) raf = requestAnimationFrame(updateActive); };
+    const onScroll = () => {
+      const previous = lastScrollLeftRef.current;
+      const current = rail.scrollLeft;
+      lastScrollLeftRef.current = current;
+      if(previous!==null && Math.abs(current - previous) > 3){
+        // Detect touch scrolling even when the browser cancels pointermove for native pan.
+        // Avoid repeating the slide sound if the pointer/wheel already triggered it.
+        gestureSound();
+      }
+      if(!raf) raf = requestAnimationFrame(update);
+      if(settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      settleTimerRef.current=setTimeout(()=>{
+        const index = centerIndex();
+        setActive(index);
+        if(index !== settledIndexRef.current){
+          settledIndexRef.current = index;
+          soundRef.current?.('pickup');
+        }
+        gestureRef.current = false;
+      }, 230);
+    };
+    lastScrollLeftRef.current = rail.scrollLeft;
+    update();
     rail.addEventListener('scroll', onScroll, {passive:true});
-    window.addEventListener('resize', onScroll);
-    onScroll();
+    window.addEventListener('resize', update);
     return ()=>{
       rail.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('resize', update);
       if(raf) cancelAnimationFrame(raf);
+      if(settleTimerRef.current) clearTimeout(settleTimerRef.current);
     };
-  },[photos.length, active]);
+  },[photos.length,stopId]);
 
   const wallFrames = useMemo(()=> photos.map((photo,i)=>({photo,index:i,rotation:rotations[i % rotations.length]})),[photos]);
 
@@ -154,7 +173,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
       <div className="relative">
         <div
           ref={railRef}
-          onPointerDown={e=>{pointerStartRef.current=e.clientX;}}
+          onPointerDown={e=>{primeUiAudio();pointerStartRef.current=e.clientX;}}
           onPointerMove={e=>{
             if(pointerStartRef.current!==null && Math.abs(e.clientX-pointerStartRef.current)>12){
               pointerStartRef.current=null;

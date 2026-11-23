@@ -41,6 +41,12 @@ function tone(ctx: AudioContext, options: {
   oscillator.stop(end + 0.01);
 }
 
+/** Unlock audio during direct touch/pointer interaction (important on iOS PWAs). */
+export function primeUiAudio(): void {
+  const ctx = getAudioContext();
+  if (ctx?.state === 'suspended') void ctx.resume().catch(() => {});
+}
+
 /** Short, filtered noise to imitate paper movement without sharp digital clicks. */
 function paper(ctx: AudioContext, options: {start: number; duration: number; volume: number; filterFrom: number; filterTo: number}) {
   const sr = ctx.sampleRate;
@@ -89,12 +95,13 @@ export async function playUiSound(
         break;
       case 'slide':
         // Light paper swish for photo movement and gallery navigation.
-        paper(ctx,{start:0,duration:0.09,volume:0.026,filterFrom:2000,filterTo:680});
+        paper(ctx,{start:0,duration:0.16,volume:0.13,filterFrom:2700,filterTo:820});
+        tone(ctx,{start:0.01,duration:0.11,from:490,to:280,volume:0.028,wave:'triangle'});
         break;
       case 'pickup':
         // A tiny tactile lift / flick when the centered memory frame settles.
-        paper(ctx,{start:0,duration:0.065,volume:0.028,filterFrom:750,filterTo:1900});
-        tone(ctx,{start:0.008,duration:0.055,from:300,to:430,volume:0.038,wave:'sine'});
+        paper(ctx,{start:0,duration:0.105,volume:0.13,filterFrom:950,filterTo:2300});
+        tone(ctx,{start:0.006,duration:0.105,from:330,to:590,volume:0.10,wave:'triangle'});
         break;
       case 'whoosh':
         // Soft airy dissolve for opening a memory in full screen.
