@@ -10,6 +10,7 @@ import { SmartImage } from './SmartImage';
 import { MemoryGallery, type MemoryPhoto } from './MemoryGallery';
 import { MemoryClipPilot } from './MemoryClipPilot';
 import { DriveVideoUploadPilot } from './DriveVideoUploadPilot';
+import { CloudVideoGallery } from './CloudVideoGallery';
 import type { UiSoundKind } from '../utils/uiSounds';
 
 interface StopDetailSheetProps {
@@ -141,6 +142,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           {!readOnly && <MemoryClipPilot stopId={stop.id}/>}
           {!readOnly && <DriveVideoUploadPilot stopId={stop.id}/>}
+          <CloudVideoGallery stopId={stop.id} readOnly={readOnly}/>
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>
             <div className="flex items-center justify-between"><h4 className="font-semibold text-sm">行程參考照片</h4><span className="text-xs text-[#5E5A52]">本機上傳 {localImageCount}/{MAX_PHOTOS_PER_STOP}</span></div>

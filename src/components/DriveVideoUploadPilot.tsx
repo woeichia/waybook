@@ -28,6 +28,7 @@ export function DriveVideoUploadPilot({ stopId }: { stopId: string }) {
       const token = await authorizeDriveVideoUpload();
       const result = await uploadPrivateVideoTest(local.blob, local.name, token, setProgress);
       setDone(result);
+      window.dispatchEvent(new CustomEvent('waybook:driveVideoUploaded', {detail:{stopId,fileId:result.id}}));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Google Drive 上傳失敗');
     } finally { setBusy(false); }
