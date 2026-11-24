@@ -8,8 +8,7 @@ import { MAX_PHOTOS_PER_STOP } from '../utils/photoGallery';
 import { CategoryBadge } from './CategoryBadge';
 import { SmartImage } from './SmartImage';
 import { MemoryGallery, type MemoryPhoto } from './MemoryGallery';
-import { MemoryClipPilot } from './MemoryClipPilot';
-import { DriveVideoUploadPilot } from './DriveVideoUploadPilot';
+import { VideoPublishPanel } from './VideoPublishPanel';
 import { CloudVideoGallery } from './CloudVideoGallery';
 import type { UiSoundKind } from '../utils/uiSounds';
 
@@ -140,8 +139,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           {stop.description && <p className="mt-4 text-sm leading-relaxed text-[#3F3D38]">{stop.description}</p>}
           {stop.transitToNext.trim() && <div className="mt-4 rounded-xl bg-[#EDEBE6] p-3 flex gap-2 text-xs text-[#5E5A52]"><Navigation className="w-4 h-4 text-[#1F3FB0] shrink-0"/>前往下一站：{stop.transitToNext}</div>}
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
-          {!readOnly && <MemoryClipPilot stopId={stop.id}/>}
-          {!readOnly && <DriveVideoUploadPilot stopId={stop.id}/>}
+          {!readOnly && <VideoPublishPanel stopId={stop.id}/>}
           <CloudVideoGallery stopId={stop.id} readOnly={readOnly} posterSrc={images[0] || undefined} posterTitle={stop.title}/>
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>

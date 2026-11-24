@@ -1,7 +1,7 @@
 /** Non-secret upload receipt. Never store OAuth access tokens or family passwords here. */
 const PREFIX = 'waybook_pending_drive_video_v153d3_';
 const validDriveId = /^[A-Za-z0-9_-]{10,120}$/;
-export type PendingVideo = {fileId:string; name:string; size:number; poster?:string; width?:number; height?:number};
+export type PendingVideo = {fileId:string; name:string; size:number; poster?:string; posterId?:string; width?:number; height?:number};
 export function readPendingVideo(stopId:string):PendingVideo|null {
   try {
     const v=JSON.parse(localStorage.getItem(PREFIX+stopId)||'null') as PendingVideo|null;

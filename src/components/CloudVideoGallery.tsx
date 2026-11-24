@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Cloud, ExternalLink, Play, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { Cloud, ExternalLink, Play, X } from 'lucide-react';
 import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
-import { readPendingVideo,clearPendingVideo,createVideoPoster } from '../utils/videoUploadReceipt';
 import { createPortal } from 'react-dom';
-import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../utils/driveCloud';
+import { cloudRead } from '../utils/driveCloud';
 
 /**
  * v15.3B - metadata only. The video bytes are NOT cached or fetched by Waybook.
@@ -32,33 +31,23 @@ function writeIndex(data: VideoIndex) {
 
 export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stopId:string; readOnly:boolean; posterSrc?:string; posterTitle?:string}) {
   const [index,setIndex] = useState<VideoIndex|null>(()=>readIndex());
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState('');
-  const [fileId,setFileId] = useState(()=>readPendingVideo(stopId)?.fileId || '');
   const [actualPoster,setActualPoster]=useState('');
-  const [manualPoster,setManualPoster]=useState<{poster:string;width:number;height:number}|null>(null);
-  const manualPosterRef=useRef<HTMLInputElement>(null);
   const [viewerOpen,setViewerOpen] = useState(false);
   const [posterFailed,setPosterFailed] = useState(false);
   useEffect(()=>setPosterFailed(false),[posterSrc,actualPoster]);
-  const [publishing,setPublishing] = useState(false);
-  const [status,setStatus] = useState('');
   const requestRef = useRef(false);
   const refresh = useCallback(async (silent = false) => {
     if(requestRef.current) return;
     requestRef.current = true;
-    if(!silent) setBusy(true);
     try {
       const next = await cloudRead<VideoIndex>({action:'videos'},20000);
       if(!next || !next.videos || typeof next.updatedAt !== 'string') throw new Error('影片索引回傳格式不正確');
       // Same index: retain the cached object; never discard media or redraw unnecessarily.
       setIndex(prev => prev?.updatedAt === next.updatedAt ? prev : next);
       writeIndex(next);
-      if(!silent) setError('');
-    } catch(e) {
-      if(!silent) setError(e instanceof Error ? e.message : '無法檢查雲端短片');
+    } catch {
       // A failed network call must never erase cached metadata.
-    } finally { requestRef.current = false; if(!silent) setBusy(false); }
+    } finally { requestRef.current = false; }
   },[]);
 
   useEffect(()=>{
@@ -70,18 +59,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     return ()=>document.removeEventListener('visibilitychange',onFocus);
   },[refresh]);
 
-  // v15.3A upload test can notify us about its latest file ID without publishing.
-  useEffect(()=>{
-    const onUpload=(event:Event)=>{
-      const detail=(event as CustomEvent<{stopId:string;fileId:string}>).detail;
-      if(detail?.stopId===stopId && DRIVE_ID.test(detail.fileId)) setFileId(detail.fileId);
-    };
-    window.addEventListener('waybook:driveVideoUploaded',onUpload);
-    return ()=>window.removeEventListener('waybook:driveVideoUploaded',onUpload);
-  },[stopId]);
-
-  // An upload receipt is saved across refreshes until the registration succeeds.
-  useEffect(()=>{setFileId(readPendingVideo(stopId)?.fileId || '');},[stopId]);
+  useEffect(()=>{const onPublished=()=>void refresh(true);window.addEventListener('waybook:videoPublished',onPublished);return()=>window.removeEventListener('waybook:videoPublished',onPublished);},[refresh]);
   const video=index?.videos?.[stopId];
   const registeredPosterId=video?.posterId;
   useEffect(()=>{
@@ -118,56 +96,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     return ()=>{ document.body.style.overflow=previous; window.removeEventListener('waybook:back',onBack);window.removeEventListener('keydown',onKey,true); };
   },[viewerOpen]);
 
-  const chooseManualPoster=async(event:React.ChangeEvent<HTMLInputElement>)=>{
-    const f=event.target.files?.[0];event.target.value='';
-    if(!f)return;
-    if(!f.type.startsWith('video/')){setError('請選擇影片檔案');return;}
-    setBusy(true);setError('');
-    try{
-      const still=await createVideoPoster(f);
-      setManualPoster(still);
-      if(video?.id&&!fileId.trim())setFileId(video.id);
-      setStatus('已擷取影片畫面；請確認本機影片與雲端影片相同，再按「登錄雲端影片」更新縮圖。');
-    }catch(e){setError(e instanceof Error?e.message:'無法擷取影片畫面');}
-    finally{setBusy(false);}
-  };
-  const publish=async()=>{
-    const id=fileId.trim();
-    if(!DRIVE_ID.test(id)){setError('請填寫有效的 Google Drive File ID');return;}
-    if(!window.confirm('將此 Drive 私人短片加入這個行程活動？此動作不會公開影片。只有獲得 Drive 個別授權的家庭成員可以觀看。'))return;
-    setPublishing(true);setError('');setStatus('');
-    try {
-      const token=await getGoogleIdToken(GOOGLE_CLIENT_ID);
-      const pending=readPendingVideo(stopId);
-      let posterId:string|undefined;
-      const thumbnail=manualPoster || (pending?.fileId===id && pending.poster ? {poster:pending.poster,width:pending.width,height:pending.height}:null);
-      if(thumbnail?.poster) {
-        const posterUpload=await cloudWrite<{fileId:string}>('uploadPhoto',{dataUrl:thumbnail.poster},token);
-        posterId=posterUpload.fileId;
-      }
-      await cloudWrite<{updatedAt:string}>('registerVideo',{
-        stopId,fileId:id,...(posterId?{posterId}:{}),
-        ...(thumbnail?.width && thumbnail.height ? {width:thumbnail.width,height:thumbnail.height}:{})
-      },token);
-      clearPendingVideo(stopId,id);setManualPoster(null);
-      setStatus('影片已登錄到 Waybook Family Videos，影片封面已同步（如裝置支援擷取）。');
-      await refresh();
-    } catch(e) {setError(e instanceof Error?e.message:'影片登錄失敗');}
-    finally {setPublishing(false);}
-  };
-  const unpublish=async()=>{
-    if(!window.confirm('從 Waybook 行程移除此影片？Drive 原始影片不會被刪除。'))return;
-    setPublishing(true);setError('');setStatus('');
-    try {
-      const token=await getGoogleIdToken(GOOGLE_CLIENT_ID);
-      await cloudWrite('removeVideo',{stopId},token);
-      setStatus('已移除行程影片參照。Drive 檔案未刪除。');
-      await refresh();
-    }catch(e){setError(e instanceof Error?e.message:'取消發布失敗');}
-    finally{setPublishing(false);}
-  };
-
-  if(readOnly && !available) return null;
+  if(!available) return null;
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
     <div className="flex items-center gap-2 font-semibold text-[#203A7C] text-sm"><Cloud size={17}/>雲端回憶短片</div>
     {available ? <>
@@ -178,23 +107,9 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
         <span className="absolute bottom-3 right-3 rounded-lg bg-black/65 px-2.5 py-1 text-[11px] font-semibold">{formatSize(video!.size)}</span>
         {effectivePoster && <span className="absolute bottom-3 left-3 rounded-lg bg-black/60 px-2 py-1 text-[10px]">{posterIsReal?'影片封面':'活動封面（尚無影片縮圖）'}</span>}
       </button>
-      <p className="text-xs text-[#5B6070]">點擊即可觀看，影片使用 Google Drive 播放。若顯示活動封面，代表此影片尚未登錄影片縮圖。Google Drive 的內建播放控制列無法由 Waybook 移除。</p>
+      <p className="text-xs text-[#5B6070]">點按封面即可播放。Google Drive 自帶的播放控制列由 Google 管理，Waybook 無法隱藏。</p>
       <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#1F3FB0] text-xs underline"><ExternalLink size={14}/>若內嵌播放失敗，請在 Google Drive 中開啟</a>
     </> : <p className="text-xs text-[#5B6070]">此活動尚未發布雲端影片。</p>}
-    {!readOnly && <div className="border-t border-[#1F3FB0]/10 pt-3 space-y-2">
-      <p className="text-xs leading-relaxed text-[#4A5568] flex gap-1 items-start"><ShieldCheck size={15} className="shrink-0"/>管理員：上傳後 File ID 會自動保存，重新整理不會遺失。按登錄時會一併發布影片畫面縮圖；已登錄的舊影片可選擇對應的原始短片，再重新登錄同一 File ID 更新縮圖（不會重複上傳影片）。</p>
-      <input ref={manualPosterRef} type="file" accept="video/*" className="hidden" onChange={e=>void chooseManualPoster(e)}/>
-      {available && <button type="button" disabled={busy||publishing} onClick={()=>manualPosterRef.current?.click()} className="rounded-lg bg-white px-3 py-2 text-xs text-[#1F3FB0] ring-1 ring-black/10 disabled:opacity-40">選擇已登錄的原始影片，產生真正封面</button>}
-      {manualPoster && <img src={manualPoster.poster} alt="待發布的影片截圖" className="w-32 h-20 object-contain bg-black rounded-lg"/>}
-      <input aria-label="要發布的 Drive File ID" type="text" className="w-full rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-black/10" placeholder="貼上已上傳的 Google Drive File ID" value={fileId} onChange={e=>setFileId(e.target.value)}/>
-      <div className="flex gap-2 flex-wrap">
-        <button type="button" disabled={publishing||busy} onClick={()=>void publish()} className="rounded-full bg-[#1F3FB0] px-4 py-2 text-xs text-white disabled:opacity-40">{publishing?'處理中…':'登錄雲端影片'}</button>
-        {available && <button type="button" disabled={publishing} onClick={()=>void unpublish()} className="rounded-full bg-white px-3 py-2 text-xs text-red-700 ring-1 ring-black/10 disabled:opacity-40">移除影片參照</button>}
-        <button type="button" disabled={busy} onClick={()=>void refresh()} className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs ring-1 ring-black/10"><RefreshCw size={13}/>{busy?'檢查中':'檢查更新'}</button>
-      </div>
-      {status&&<p role="status" className="text-xs text-green-800">{status}</p>}
-    </div>}
-    {error&&<p role="alert" className="text-xs text-red-700">{error}</p>}
     {viewerOpen&&available&&createPortal(
       <div data-waybook-video-viewer role="dialog" aria-modal="true" aria-label="雲端影片播放" className="fixed inset-0 z-[9999] flex flex-col bg-[#050505] text-white" onClick={close}>
         <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 pt-[env(safe-area-inset-top)]" onClick={e=>e.stopPropagation()}>
