@@ -10,6 +10,7 @@ import { SmartImage } from './SmartImage';
 import { MemoryGallery, type MemoryPhoto } from './MemoryGallery';
 import { VideoPublishPanel } from './VideoPublishPanel';
 import { CloudVideoGallery } from './CloudVideoGallery';
+import { VideoPlayerLab } from './VideoPlayerLab';
 import type { UiSoundKind } from '../utils/uiSounds';
 
 interface StopDetailSheetProps {
@@ -114,8 +115,17 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     finally { setBusy(false); }
   };
 
+  const closeReferencePhoto = () => {
+    if(window.history.state?.waybookNav && window.history.state.layer==='media' && window.history.length>1) window.history.back();
+    else setFullView(false);
+  };
+  const requestClose = () => {
+    if(window.history.state?.waybookNav && window.history.state.layer==='event' && window.history.length>1) window.history.back();
+    else onClose();
+  };
+
   return <AnimatePresence>
-    {stop && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={onClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
+    {stop && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
       <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}} transition={{duration:0.22}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e=>e.stopPropagation()}>
         <div className="relative shrink-0 bg-[#E5E2DC]">
           <div ref={scrollRef} className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none" style={{scrollbarWidth:'none'}} onScroll={e=>{const el=e.currentTarget; setPosition(Math.min(imageCount-1,Math.max(0,Math.round(el.scrollLeft/Math.max(1,el.clientWidth)))));}}>
@@ -130,7 +140,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
             <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-1.5 pointer-events-none">{images.map((_,i)=><span key={i} className={`h-1.5 rounded-full ${position===i?'w-5 bg-white':'w-1.5 bg-white/60'}`}/>)}</div>
           </>}
           <span className="absolute top-3 left-3 rounded-full bg-black/50 text-white text-xs px-3 py-1 flex items-center gap-1.5"><Images className="w-3.5 h-3.5"/>{Math.min(position+1,Math.max(1,imageCount))}/{Math.max(1,imageCount)}</span>
-          <button type="button" aria-label="關閉詳情" onClick={onClose} className="absolute right-3 top-3 min-w-11 min-h-11 flex justify-center items-center rounded-full bg-white/95"><X className="w-5 h-5"/></button>
+          <button type="button" aria-label="關閉詳情" onClick={requestClose} className="absolute right-3 top-3 min-w-11 min-h-11 flex justify-center items-center rounded-full bg-white/95"><X className="w-5 h-5"/></button>
         </div>
         <div className="p-5 sm:p-6 overflow-y-auto">
           <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-xs text-[#5E5A52]"><Clock className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.time}</span><CategoryBadge category={stop.category}/></div>
@@ -141,6 +151,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           {!readOnly && <VideoPublishPanel stopId={stop.id}/>}
           <CloudVideoGallery stopId={stop.id} readOnly={readOnly} posterSrc={images[0] || undefined} posterTitle={stop.title}/>
+          {!readOnly && <VideoPlayerLab/>}
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>
             <div className="flex items-center justify-between"><h4 className="font-semibold text-sm">行程參考照片</h4><span className="text-xs text-[#5E5A52]">本機上傳 {localImageCount}/{MAX_PHOTOS_PER_STOP}</span></div>
@@ -157,7 +168,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
         </div>
       </motion.div>
       {fullView && imageCount>0 && <div data-waybook-ref-photo-viewer className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-4" onClick={e=>e.stopPropagation()} role="dialog" aria-modal="true" aria-label="完整照片">
-        <button type="button" onClick={()=>setFullView(false)} aria-label="關閉照片" className="absolute top-5 right-5 text-white bg-white/20 rounded-full p-3"><X className="w-6 h-6"/></button>
+        <button type="button" onClick={closeReferencePhoto} aria-label="關閉照片" className="absolute top-5 right-5 text-white bg-white/20 rounded-full p-3"><X className="w-6 h-6"/></button>
         <img src={images[position]} alt={`${stop.title} 完整照片 ${position+1}`} className="max-w-full max-h-[78vh] object-contain"/>
         <div className="mt-5 flex gap-5 items-center text-white"><button data-sound-control aria-label="上一張照片" disabled={position===0} onClick={()=>goTo(position-1)} className="p-2 disabled:opacity-30"><ArrowLeft/></button><span className="text-sm">{position+1} / {imageCount}</span><button data-sound-control aria-label="下一張照片" disabled={position===imageCount-1} onClick={()=>goTo(position+1)} className="p-2 disabled:opacity-30"><ArrowRight/></button></div>
       </div>}

@@ -1,22 +1,22 @@
 const CLOUD_URL = (import.meta.env.VITE_WAYBOOK_APPS_SCRIPT_URL || '').trim();
 
-const SESSION_KEY = 'waybook_family_session_v153c';
+const SESSION_KEY = 'waybook_family_session_v153c'; // server-validated, persistent until expiry or Lock
 export type FamilySession = { token: string; expiresAt: number };
 
 export function readFamilySession(): FamilySession | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const value = JSON.parse(raw) as FamilySession;
     if (typeof value.token !== 'string' || !/^[a-f0-9]{64}$/.test(value.token) || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now()) {
-      sessionStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(SESSION_KEY);
       return null;
     }
     return value;
   } catch { return null; }
 }
-export function saveFamilySession(session: FamilySession) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
-export function clearFamilySession() { try { sessionStorage.removeItem(SESSION_KEY); } catch {} }
+export function saveFamilySession(session: FamilySession) { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
+export function clearFamilySession() { try { localStorage.removeItem(SESSION_KEY); } catch {} }
 
 /** POST-only iframe bridge: never put the family code or session in URL/query strings. */
 export function familyRequest<T>(action: string, data: unknown, timeout = 30000): Promise<T> {

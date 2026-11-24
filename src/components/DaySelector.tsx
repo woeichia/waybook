@@ -51,7 +51,7 @@ export const DaySelector: React.FC<DaySelectorProps> = ({days,selectedDayIndex,d
       }
       const label = (button.getAttribute('aria-label') || button.textContent || '').trim();
       if (!button.closest('[data-waybook-event-viewer]')) return;
-      if (/放大照片|查看回憶照片|查看大圖|播放短片|全螢幕方式播放/.test(label)) {
+      if (/放大照片|查看回憶照片|查看大圖|全螢幕方式播放/.test(label)) {
         window.history.pushState({waybookNav:true,day:currentDayRef.current,layer:'media'},'',window.location.href);
       }
     };

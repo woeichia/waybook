@@ -22,6 +22,8 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const railRef=useRef<HTMLDivElement>(null);
   const gestureRef=useRef(false);
   const pointerStartRef=useRef<number|null>(null);
+  const mouseDragRef=useRef<{x:number;left:number}|null>(null);
+  const draggedRef=useRef(false);
   const settledIndexRef=useRef(0);
   const settleTimerRef=useRef<ReturnType<typeof setTimeout>|null>(null);
   const lastGestureSoundRef=useRef(0);
@@ -31,18 +33,15 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<number|null>(null);
   const [active,setActive]=useState(0);
-  useEffect(()=>{
-    if(selected===null) return;
-    const back=()=>{onSound?.('tap');setSelected(null);};
-    const key=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.stopImmediatePropagation();back();}};
-    window.addEventListener('waybook:back',back);
-    window.addEventListener('keydown',key,true);
-    return ()=>{window.removeEventListener('waybook:back',back);window.removeEventListener('keydown',key,true);};
-  },[selected,onSound]);
 
   useEffect(()=>{
     if(active>Math.max(photos.length-1,0)) setActive(Math.max(photos.length-1,0));
   },[photos.length,active]);
+
+  const dismissSelected = () => {
+    if (window.history.state?.waybookNav && window.history.state.layer==='media' && window.history.length>1) window.history.back();
+    else setSelected(null);
+  };
 
   const activePhoto = photos[active] || null;
 
@@ -94,7 +93,12 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const scrollToCard = (index:number)=>{
     const rail = railRef.current;
     const el = rail?.querySelector<HTMLElement>(`[data-card-index="${index}"]`);
-    el?.scrollIntoView({behavior:'smooth', inline:'center', block:'nearest'});
+    if (!rail || !el) return;
+    // Scroll only the photo rail: scrollIntoView may move the entire event panel.
+    const railBox=rail.getBoundingClientRect();
+    const cardBox=el.getBoundingClientRect();
+    const target=rail.scrollLeft + (cardBox.left+cardBox.width/2) - (railBox.left+railBox.width/2);
+    rail.scrollTo({left:Math.max(0,target),behavior:'smooth'});
   };
 
   const moveActive = (next:number)=>{
@@ -145,7 +149,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
       window.removeEventListener('resize', onScroll);
       if(raf) cancelAnimationFrame(raf);
     };
-  },[photos.length, active]);
+  },[photos.length]);
 
   const wallFrames = useMemo(()=> photos.map((photo,i)=>({photo,index:i,rotation:rotations[i % rotations.length]})),[photos]);
 
@@ -162,20 +166,32 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
       <div className="relative">
         <div
           ref={railRef}
-          onPointerDown={e=>{pointerStartRef.current=e.clientX;}}
+          onPointerDown={e=>{
+            pointerStartRef.current=e.clientX;
+            draggedRef.current=false;
+            mouseDragRef.current=e.pointerType==='mouse' ? {x:e.clientX,left:e.currentTarget.scrollLeft} : null;
+          }}
           onPointerMove={e=>{
-            if(pointerStartRef.current!==null && Math.abs(e.clientX-pointerStartRef.current)>12){
-              pointerStartRef.current=null;
+            const drag=mouseDragRef.current;
+            if(drag && (e.buttons&1)===1){
+              const delta=e.clientX-drag.x;
+              if(Math.abs(delta)>8){
+                draggedRef.current=true;
+                e.currentTarget.scrollLeft=drag.left-delta;
+                gestureSound();
+              }
+            } else if(pointerStartRef.current!==null && Math.abs(e.clientX-pointerStartRef.current)>12){
               gestureSound();
             }
           }}
-          onPointerUp={()=>{pointerStartRef.current=null;}}
-          onPointerCancel={()=>{pointerStartRef.current=null;}}
+          onPointerUp={()=>{pointerStartRef.current=null;mouseDragRef.current=null;}}
+          onPointerCancel={()=>{pointerStartRef.current=null;mouseDragRef.current=null;}}
+          onClickCapture={e=>{if(draggedRef.current){e.preventDefault();e.stopPropagation();draggedRef.current=false;}}}
           onWheel={gestureSound}
-          className="overflow-x-auto overflow-y-visible px-4 py-5 -mx-2 no-scrollbar snap-x snap-mandatory"
-          style={{scrollPaddingLeft:'4rem', scrollPaddingRight:'4rem'}}
+          className="overflow-x-auto overflow-y-visible py-5 -mx-2 no-scrollbar snap-x snap-mandatory cursor-grab active:cursor-grabbing"
+          style={{paddingInline:`max(16px, calc(50% - ${CARD_WIDTH/2}px))`,scrollPaddingLeft:'50%', scrollPaddingRight:'50%'}}
         >
-          <div className="flex items-end min-w-max pr-6">
+          <div className="flex items-end min-w-max">
             {wallFrames.map(({photo,index,rotation},i)=>{
               const isActive = active===index;
               return <button
@@ -208,8 +224,8 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
         </div>
 
         {photos.length>1 && <>
-          <button type="button" aria-label="上一張回憶照片" className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-lg ring-1 ring-black/10 p-2 disabled:opacity-30" disabled={active===0} onClick={()=>moveActive(active-1)}><ChevronLeft className="w-4 h-4"/></button>
-          <button type="button" aria-label="下一張回憶照片" className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-lg ring-1 ring-black/10 p-2 disabled:opacity-30" disabled={active===photos.length-1} onClick={()=>moveActive(active+1)}><ChevronRight className="w-4 h-4"/></button>
+          <button type="button" aria-label="上一張回憶照片" className="absolute z-40 left-0 top-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-lg ring-1 ring-black/10 p-2 disabled:opacity-30" disabled={active===0} onClick={()=>moveActive(active-1)}><ChevronLeft className="w-4 h-4"/></button>
+          <button type="button" aria-label="下一張回憶照片" className="absolute z-40 right-0 top-1/2 -translate-y-1/2 rounded-full bg-white/90 shadow-lg ring-1 ring-black/10 p-2 disabled:opacity-30" disabled={active===photos.length-1} onClick={()=>moveActive(active+1)}><ChevronRight className="w-4 h-4"/></button>
         </>}
       </div>
 
@@ -256,8 +272,8 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
     </>}
     {error&&<p role="alert" className="text-red-700 text-xs">{error}</p>}
 
-    {selected!==null && photos[selected]?.src && <div data-waybook-memory-photo-viewer role="dialog" aria-modal="true" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={()=>{onSound?.('tap');setSelected(null);}}>
-      <button aria-label="關閉回憶照片" className="absolute top-5 right-5 text-white p-2 bg-white/20 rounded-full" onClick={e=>{e.stopPropagation();onSound?.('tap');setSelected(null);}}>✕</button>
+    {selected!==null && photos[selected]?.src && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={()=>{onSound?.('tap');dismissSelected();}}>
+      <button aria-label="關閉回憶照片" className="absolute top-5 right-5 text-white p-2 bg-white/20 rounded-full" onClick={e=>{e.stopPropagation();onSound?.('tap');dismissSelected();}}>✕</button>
       <img className="max-w-full max-h-[75vh] object-contain" src={photos[selected].src} alt={photos[selected].caption||'旅途回憶'}/>
       <p className="text-white text-sm mt-4 text-center max-w-xl">{photos[selected].caption || '旅途回憶'}</p>
       <div className="flex items-center gap-4 mt-3 text-white">

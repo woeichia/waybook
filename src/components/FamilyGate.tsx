@@ -45,7 +45,7 @@ export function FamilyGate({children}: GateProps) {
       <div className="flex items-center gap-2 rounded-xl bg-white ring-1 ring-black/10 px-3"><input className="w-full min-w-0 py-3 outline-none bg-transparent text-sm" autoComplete="off" type={show?'text':'password'} value={code} onChange={e=>setCode(e.target.value)} placeholder="家庭通行密碼" required minLength={12} maxLength={128} aria-label="家庭通行密碼"/><button type="button" className="p-2 text-[#5E5A52]" onClick={()=>setShow(v=>!v)} aria-label={show?'隱藏密碼':'顯示密碼'}>{show?<EyeOff size={18}/>:<Eye size={18}/>}</button></div>
       {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
       <button type="submit" disabled={busy||code.length<12} className="w-full min-h-11 rounded-xl bg-[#1F3FB0] text-white font-semibold disabled:opacity-40">{busy?'正在驗證…':'進入行程'}</button>
-      <p className="text-xs leading-relaxed text-[#686259]">登入只在目前瀏覽器工作階段有效；過期或選擇「鎖定」後需重新輸入。不要將密碼貼到公開群組。</p>
+      <p className="text-xs leading-relaxed text-[#686259]">登入最長保留 12 小時（重新開啟會向伺服器驗證）；按「鎖定」或過期需重新輸入。共用裝置請記得鎖定。</p>
     </form>
   </main>;
 }
