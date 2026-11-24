@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Cloud, ExternalLink, Play, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
+import { readPendingVideo,clearPendingVideo,createVideoPoster } from '../utils/videoUploadReceipt';
 import { createPortal } from 'react-dom';
 import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../utils/driveCloud';
 
@@ -8,7 +10,7 @@ import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../ut
  * Drive's own authorization is enforced by the preview iframe/new-tab page.
  * Never use unlisted / anyone-with-link permissions automatically.
  */
-type VideoRef = { id: string; size: number; mimeType: string };
+type VideoRef = { id: string; size: number; mimeType: string; posterId?: string; width?: number; height?: number };
 type VideoIndex = { updatedAt: string; videos: Record<string, VideoRef> };
 const CACHE_KEY = 'waybook_video_index_153b';
 const DRIVE_ID = /^[A-Za-z0-9_-]{10,120}$/;
@@ -32,10 +34,13 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const [index,setIndex] = useState<VideoIndex|null>(()=>readIndex());
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState('');
-  const [fileId,setFileId] = useState('');
+  const [fileId,setFileId] = useState(()=>readPendingVideo(stopId)?.fileId || '');
+  const [actualPoster,setActualPoster]=useState('');
+  const [manualPoster,setManualPoster]=useState<{poster:string;width:number;height:number}|null>(null);
+  const manualPosterRef=useRef<HTMLInputElement>(null);
   const [viewerOpen,setViewerOpen] = useState(false);
   const [posterFailed,setPosterFailed] = useState(false);
-  useEffect(()=>setPosterFailed(false),[posterSrc]);
+  useEffect(()=>setPosterFailed(false),[posterSrc,actualPoster]);
   const [publishing,setPublishing] = useState(false);
   const [status,setStatus] = useState('');
   const requestRef = useRef(false);
@@ -75,7 +80,29 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     return ()=>window.removeEventListener('waybook:driveVideoUploaded',onUpload);
   },[stopId]);
 
+  // An upload receipt is saved across refreshes until the registration succeeds.
+  useEffect(()=>{setFileId(readPendingVideo(stopId)?.fileId || '');},[stopId]);
   const video=index?.videos?.[stopId];
+  const registeredPosterId=video?.posterId;
+  useEffect(()=>{
+    let alive=true;setActualPoster('');
+    if(!registeredPosterId)return;
+    (async()=>{
+      const cached=await readCachedPhotos([registeredPosterId]).catch(()=>({} as Record<string,string>));
+      if(!alive)return;
+      if(cached[registeredPosterId]) {setActualPoster(cached[registeredPosterId]);return;}
+      try {
+        const result=await cloudRead<{dataUrl:string}>({action:'videoPoster',stopId,fileId:registeredPosterId},30000);
+        if(!alive||!result?.dataUrl?.startsWith('data:image/'))return;
+        setActualPoster(result.dataUrl);
+        void saveCachedPhoto(registeredPosterId,result.dataUrl).catch(()=>{});
+      }catch {/* Keep event-cover fallback when offline or thumbnail is unavailable. */}
+    })();
+    return()=>{alive=false;};
+  },[registeredPosterId,stopId]);
+  const effectivePoster=actualPoster || posterSrc;
+  const posterIsReal=Boolean(actualPoster);
+
   const available=Boolean(video && DRIVE_ID.test(video.id));
   const driveUrl=available ? `https://drive.google.com/file/d/${video!.id}/view` : '';
   const previewUrl=available ? `https://drive.google.com/file/d/${video!.id}/preview` : '';
@@ -91,6 +118,19 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     return ()=>{ document.body.style.overflow=previous; window.removeEventListener('waybook:back',onBack);window.removeEventListener('keydown',onKey,true); };
   },[viewerOpen]);
 
+  const chooseManualPoster=async(event:React.ChangeEvent<HTMLInputElement>)=>{
+    const f=event.target.files?.[0];event.target.value='';
+    if(!f)return;
+    if(!f.type.startsWith('video/')){setError('請選擇影片檔案');return;}
+    setBusy(true);setError('');
+    try{
+      const still=await createVideoPoster(f);
+      setManualPoster(still);
+      if(video?.id&&!fileId.trim())setFileId(video.id);
+      setStatus('已擷取影片畫面；請確認本機影片與雲端影片相同，再按「登錄雲端影片」更新縮圖。');
+    }catch(e){setError(e instanceof Error?e.message:'無法擷取影片畫面');}
+    finally{setBusy(false);}
+  };
   const publish=async()=>{
     const id=fileId.trim();
     if(!DRIVE_ID.test(id)){setError('請填寫有效的 Google Drive File ID');return;}
@@ -98,8 +138,19 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     setPublishing(true);setError('');setStatus('');
     try {
       const token=await getGoogleIdToken(GOOGLE_CLIENT_ID);
-      await cloudWrite<{updatedAt:string}>('registerVideo',{stopId,fileId:id},token);
-      setStatus('影片已登錄並移至 Waybook Family Videos 子資料夾。請將該資料夾以「檢視者」身分分享給家人的 Google 帳戶。');
+      const pending=readPendingVideo(stopId);
+      let posterId:string|undefined;
+      const thumbnail=manualPoster || (pending?.fileId===id && pending.poster ? {poster:pending.poster,width:pending.width,height:pending.height}:null);
+      if(thumbnail?.poster) {
+        const posterUpload=await cloudWrite<{fileId:string}>('uploadPhoto',{dataUrl:thumbnail.poster},token);
+        posterId=posterUpload.fileId;
+      }
+      await cloudWrite<{updatedAt:string}>('registerVideo',{
+        stopId,fileId:id,...(posterId?{posterId}:{}),
+        ...(thumbnail?.width && thumbnail.height ? {width:thumbnail.width,height:thumbnail.height}:{})
+      },token);
+      clearPendingVideo(stopId,id);setManualPoster(null);
+      setStatus('影片已登錄到 Waybook Family Videos，影片封面已同步（如裝置支援擷取）。');
       await refresh();
     } catch(e) {setError(e instanceof Error?e.message:'影片登錄失敗');}
     finally {setPublishing(false);}
@@ -120,18 +171,21 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
     <div className="flex items-center gap-2 font-semibold text-[#203A7C] text-sm"><Cloud size={17}/>雲端回憶短片</div>
     {available ? <>
-      <button type="button" onClick={()=>setViewerOpen(true)} className="group relative block w-full aspect-video overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]" aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
-        {posterSrc && !posterFailed ? <img src={posterSrc} onError={()=>setPosterFailed(true)} alt={posterTitle ? `${posterTitle} 活動封面` : '活動封面'} className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-active:scale-[1.02]"/> : <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-br from-[#243B56] via-[#34596A] to-[#17243C]"/>}
+      <button type="button" onClick={()=>setViewerOpen(true)} className={`group relative block w-full ${video?.height && video.width && video.height>video.width ? 'aspect-[4/5]' : 'aspect-video'} overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`} aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
+        {effectivePoster && !posterFailed ? <img src={effectivePoster} onError={()=>setPosterFailed(true)} alt={posterIsReal ? '影片實際畫面' : (posterTitle ? `${posterTitle} 活動封面` : '活動封面')} className={`absolute inset-0 h-full w-full ${posterIsReal ? 'object-contain' : 'object-cover'} transition-transform duration-200 group-active:scale-[1.02]`}/> : <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-br from-[#243B56] via-[#34596A] to-[#17243C]"/>}
         <span className="absolute inset-0 bg-black/30" aria-hidden="true"/>
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2"><span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/95 text-[#1F3FB0] shadow-lg"><Play size={29} fill="currentColor" className="ml-1"/></span><span className="rounded-full bg-black/55 px-3 py-1 text-sm font-semibold">播放回憶短片</span></span>
         <span className="absolute bottom-3 right-3 rounded-lg bg-black/65 px-2.5 py-1 text-[11px] font-semibold">{formatSize(video!.size)}</span>
-        {posterSrc && <span className="absolute bottom-3 left-3 rounded-lg bg-black/60 px-2 py-1 text-[10px]">活動封面</span>}
+        {effectivePoster && <span className="absolute bottom-3 left-3 rounded-lg bg-black/60 px-2 py-1 text-[10px]">{posterIsReal?'影片封面':'活動封面（尚無影片縮圖）'}</span>}
       </button>
-      <p className="text-xs text-[#5B6070]">點擊預覽即可觀看；只在播放時載入 Google Drive。活動封面不一定是影片畫面。私人 Drive 檔案仍需個別 Google 存取權限。</p>
+      <p className="text-xs text-[#5B6070]">點擊即可觀看，影片使用 Google Drive 播放。若顯示活動封面，代表此影片尚未登錄影片縮圖。Google Drive 的內建播放控制列無法由 Waybook 移除。</p>
       <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#1F3FB0] text-xs underline"><ExternalLink size={14}/>若內嵌播放失敗，請在 Google Drive 中開啟</a>
     </> : <p className="text-xs text-[#5B6070]">此活動尚未發布雲端影片。</p>}
     {!readOnly && <div className="border-t border-[#1F3FB0]/10 pt-3 space-y-2">
-      <p className="text-xs leading-relaxed text-[#4A5568] flex gap-1 items-start"><ShieldCheck size={15} className="shrink-0"/>管理員：先使用上方 v15.3A 上傳測試功能取得 File ID，然後在這裡登錄。登錄會將影片移入 Waybook Family Videos 私人子資料夾，不會公開分享。</p>
+      <p className="text-xs leading-relaxed text-[#4A5568] flex gap-1 items-start"><ShieldCheck size={15} className="shrink-0"/>管理員：上傳後 File ID 會自動保存，重新整理不會遺失。按登錄時會一併發布影片畫面縮圖；已登錄的舊影片可選擇對應的原始短片，再重新登錄同一 File ID 更新縮圖（不會重複上傳影片）。</p>
+      <input ref={manualPosterRef} type="file" accept="video/*" className="hidden" onChange={e=>void chooseManualPoster(e)}/>
+      {available && <button type="button" disabled={busy||publishing} onClick={()=>manualPosterRef.current?.click()} className="rounded-lg bg-white px-3 py-2 text-xs text-[#1F3FB0] ring-1 ring-black/10 disabled:opacity-40">選擇已登錄的原始影片，產生真正封面</button>}
+      {manualPoster && <img src={manualPoster.poster} alt="待發布的影片截圖" className="w-32 h-20 object-contain bg-black rounded-lg"/>}
       <input aria-label="要發布的 Drive File ID" type="text" className="w-full rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-black/10" placeholder="貼上已上傳的 Google Drive File ID" value={fileId} onChange={e=>setFileId(e.target.value)}/>
       <div className="flex gap-2 flex-wrap">
         <button type="button" disabled={publishing||busy} onClick={()=>void publish()} className="rounded-full bg-[#1F3FB0] px-4 py-2 text-xs text-white disabled:opacity-40">{publishing?'處理中…':'登錄雲端影片'}</button>
@@ -148,9 +202,10 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
           <button type="button" onClick={close} className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-4 text-sm" aria-label="關閉雲端影片"><X size={19}/>關閉</button>
         </header>
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2 sm:p-4" onClick={e=>e.stopPropagation()}>
-          <iframe key={video!.id} src={previewUrl} title="Google Drive 雲端短片" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="no-referrer-when-downgrade" className="h-full max-h-[min(80dvh,750px)] w-full max-w-[1000px] rounded-lg border-0 bg-black"/>
+          <iframe key={video!.id} src={previewUrl} title="Google Drive 雲端短片" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="no-referrer-when-downgrade" style={{aspectRatio:video?.width && video?.height?`${video.width} / ${video.height}`:undefined}} className={`w-full rounded-lg border-0 bg-black ${video?.width && video.height && video.height > video.width ? 'max-w-[min(75vw,440px)] h-[min(75dvh,850px)]' : 'max-w-[1000px] h-[min(76dvh,750px)]'}`} />
         </div>
-        <footer className="flex shrink-0 items-center justify-center px-3 pb-[max(env(safe-area-inset-bottom),12px)] pt-2" onClick={e=>e.stopPropagation()}>
+        <footer className="flex shrink-0 flex-col gap-2 items-center justify-center px-3 pb-[max(env(safe-area-inset-bottom),12px)] pt-2" onClick={e=>e.stopPropagation()}>
+          <p className="text-center text-[11px] text-white/60">Google Drive 原生控制列會蓋在畫面上；可嘗試播放後輕觸空白處隱藏，或使用全螢幕鍵。</p>
           <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 text-xs text-white/85"><ExternalLink size={14}/>若無法播放，使用 Google Drive 開啟</a>
         </footer>
       </div>,document.body
