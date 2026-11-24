@@ -36,8 +36,8 @@ export async function downloadForCache(stopId:string,expectedSize:number,onProgr
       if(!signal.aborted)onProgress(Math.round(completed/count*100));
     }
   }
-  // Two requests in parallel, rather than ~100 sequential requests for a 25 MB clip.
-  await Promise.all([worker(),worker()]);
+  // Three requests in parallel (pilot). Keep backend 512 KiB chunks unchanged.
+  await Promise.all([worker(),worker(),worker()]);
   if(signal.aborted)throw Error('下載已取消');
   const blob=new Blob(parts as BlobPart[],{type:mime});
   if(blob.size!==expectedSize)throw Error('影片大小校驗失敗');
