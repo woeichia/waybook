@@ -142,7 +142,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           {!readOnly && <MemoryClipPilot stopId={stop.id}/>}
           {!readOnly && <DriveVideoUploadPilot stopId={stop.id}/>}
-          <CloudVideoGallery stopId={stop.id} readOnly={readOnly}/>
+          <CloudVideoGallery stopId={stop.id} readOnly={readOnly} posterSrc={images[0] || undefined} posterTitle={stop.title}/>
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">
             {!readOnly && <>
             <div className="flex items-center justify-between"><h4 className="font-semibold text-sm">行程參考照片</h4><span className="text-xs text-[#5E5A52]">本機上傳 {localImageCount}/{MAX_PHOTOS_PER_STOP}</span></div>
