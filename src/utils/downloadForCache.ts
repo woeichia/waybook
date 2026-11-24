@@ -1,6 +1,6 @@
 import { familyRead } from './familyAccess';
 /** Authenticated private Drive download. No family Google login and no OAuth token in browser. */
-const CHUNK=256*1024, LIMIT=25*1024*1024;
+const CHUNK=512*1024, LIMIT=25*1024*1024;
 type Chunk={base64:string;start:number;end:number;total:number;mimeType:string};
 function decode(b64:string):Uint8Array{
   const raw=atob(b64), bytes=new Uint8Array(raw.length);
