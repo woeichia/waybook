@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud } from 'lucide-react';
+import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud, Maximize2, Minimize2, RotateCw, RotateCcw, Pause, Volume2, VolumeX } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
 import { cloudRead } from '../utils/driveCloud';
 import { getCachedVideo, putCachedVideo } from '../utils/videoCache';
@@ -36,6 +37,62 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const [playError,setPlayError] = useState('');
   const [videoUrl,setVideoUrl] = useState('');
   const [sourceLabel,setSourceLabel] = useState('');
+  // A Waybook-owned viewer avoids triggering the phone's native fullscreen rotation.
+  const inlineRef=useRef<HTMLVideoElement>(null);
+  const expandedRef=useRef<HTMLVideoElement>(null);
+  const [expanded,setExpanded]=useState(false);
+  const [landscape,setLandscape]=useState(false);
+  const [playing,setPlaying]=useState(false);
+  const [muted,setMuted]=useState(false);
+  const [currentTime,setCurrentTime]=useState(0);
+  const [duration,setDuration]=useState(0);
+  const savedTimeRef=useRef(0);
+  const resumeRef=useRef(false);
+  const openExpanded=()=>{
+    const player=inlineRef.current;
+    savedTimeRef.current=player?.currentTime||0;
+    resumeRef.current=Boolean(player && !player.paused);
+    player?.pause();
+    setLandscape(false);setExpanded(true);
+    // Give the expanded view its own browser history entry so phone Back closes it once.
+    if(window.history.state?.waybookNav){
+      window.history.pushState({waybookNav:true,day:window.history.state.day,layer:'media'},'',window.location.href);
+    }
+  };
+  const closeExpanded=()=>{
+    const player=expandedRef.current;
+    savedTimeRef.current=player?.currentTime||savedTimeRef.current;
+    resumeRef.current=Boolean(player && !player.paused);
+    player?.pause();setExpanded(false);setLandscape(false);
+    requestAnimationFrame(()=>{
+      const inline=inlineRef.current;
+      if(inline){inline.currentTime=savedTimeRef.current;if(resumeRef.current)void inline.play().catch(()=>{});}
+    });
+  };
+  const requestCloseExpanded=()=>{
+    if(window.history.state?.waybookNav && window.history.state.layer==='media' && window.history.length>1)
+      window.history.back();
+    else closeExpanded();
+  };
+  useEffect(()=>{
+    if(!expanded)return;
+    const onBack=()=>closeExpanded();
+    window.addEventListener('waybook:back',onBack);
+    return()=>window.removeEventListener('waybook:back',onBack);
+  },[expanded]);
+  const syncExpanded=()=>{
+    const player=expandedRef.current;
+    if(!player)return;
+    player.currentTime=Math.min(savedTimeRef.current,Number.isFinite(player.duration)?player.duration:0);
+    player.muted=muted;
+    if(resumeRef.current)void player.play().catch(()=>{});
+  };
+  const togglePlay=()=>{
+    const player=expandedRef.current;
+    if(!player)return;
+    if(player.paused)void player.play().catch(()=>{});else player.pause();
+  };
+
   const requestAbort=useRef<AbortController|null>(null);
   const videoUrlRef=useRef('');
   const playSequence=useRef(0);
@@ -100,7 +157,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const stopPlayback=()=>{
     playSequence.current++;
     requestAbort.current?.abort();requestAbort.current=null;
-    setViewerOpen(false);setLoading(false);setPlayError('');setProgress(0);
+    setExpanded(false);setLandscape(false);setViewerOpen(false);setLoading(false);setPlayError('');setProgress(0);
     if(videoUrlRef.current)URL.revokeObjectURL(videoUrlRef.current);
     videoUrlRef.current='';setVideoUrl('');setSourceLabel('');
   };
@@ -138,10 +195,10 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   };
   useEffect(()=>{
     if(!viewerOpen)return;
-    const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape')stopPlayback();};
+    const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){if(expanded)requestCloseExpanded();else stopPlayback();}};
     window.addEventListener('keydown',onKey);
     return()=>window.removeEventListener('keydown',onKey);
-  },[viewerOpen]);
+  },[viewerOpen,expanded]);
 
   if (!available) return null;
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
@@ -167,12 +224,64 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
         </div> : playError ? <div className="rounded-xl bg-red-50 p-3 space-y-2">
           <p className="text-xs text-red-800" role="alert">{playError}</p>
           <button type="button" onClick={()=>void play()} className="rounded-full bg-[#1F3FB0] px-3 py-2 text-xs text-white">重試下載</button>
-        </div> : videoUrl ? <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${portrait?'max-w-[360px]':''}`}>
-          <video key={videoUrl} src={videoUrl} controls playsInline autoPlay preload="metadata" className="block h-auto w-full max-h-[65dvh] object-contain" />
+        </div> : videoUrl ? <div className="space-y-2">
+          <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${portrait?'max-w-[360px]':''}`}>
+            <video ref={inlineRef} key={videoUrl} src={videoUrl} controls playsInline autoPlay preload="metadata"
+              controlsList="nofullscreen" disablePictureInPicture
+              className="block h-auto w-full max-h-[65dvh] object-contain" />
+          </div>
+          <button type="button" onClick={openExpanded} className="mx-auto flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#1F3FB0] px-4 py-2 text-sm font-semibold text-white">
+            <Maximize2 size={17}/>符合螢幕放大（不自動旋轉）
+          </button>
         </div> : null}
         {sourceLabel&&<p className="text-center text-[11px] text-[#5B6070]">{sourceLabel}</p>}
       </div>
     )}
     <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#1F3FB0] text-xs underline"><ExternalLink size={14}/>若內嵌播放失敗，請在 Google Drive 中開啟</a>
+    {expanded && videoUrl && createPortal(
+      <div data-waybook-video-viewer role="dialog" aria-modal="true" aria-label="回憶短片放大播放"
+        className="fixed inset-0 z-[9999] flex flex-col bg-black text-white" style={{height:'100dvh'}}>
+        <div className="flex shrink-0 items-center justify-between px-3 pt-[max(env(safe-area-inset-top),8px)] pb-2">
+          <span className="min-w-0 truncate text-xs">{posterTitle || '回憶短片'}</span>
+          <button type="button" onClick={requestCloseExpanded} className="flex min-h-11 items-center gap-2 rounded-full bg-white/15 px-4 text-sm">
+            <Minimize2 size={16}/>返回行程
+          </button>
+        </div>
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+            <video ref={expandedRef} src={videoUrl} playsInline preload="metadata"
+              onLoadedMetadata={syncExpanded}
+              onTimeUpdate={e=>setCurrentTime(e.currentTarget.currentTime)}
+              onDurationChange={e=>setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0)}
+              onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)}
+              className="block max-w-full max-h-full object-contain"
+              style={landscape?{
+                width:'100dvh',height:'100dvw',maxWidth:'none',maxHeight:'none',
+                transform:'rotate(90deg)',objectFit:'contain'
+              }:{width:'100%',height:'100%',objectFit:'contain'}}
+              onClick={togglePlay}/>
+          </div>
+        </div>
+        <div className="shrink-0 space-y-3 bg-black/95 px-3 pt-3 pb-[max(env(safe-area-inset-bottom),16px)]">
+          <input type="range" aria-label="影片進度" min={0} max={duration || 1} step={0.1} value={Math.min(currentTime,duration || 1)}
+            onChange={e=>{const v=expandedRef.current;if(v){v.currentTime=Number(e.target.value);setCurrentTime(v.currentTime);}}}
+            className="w-full accent-white"/>
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" onClick={togglePlay} aria-label={playing?'暫停影片':'播放影片'} className="flex min-h-11 items-center gap-2 rounded-full bg-white/15 px-4 text-sm">
+              {playing?<Pause size={18}/>:<Play size={18}/>} {playing?'暫停':'播放'}
+            </button>
+            <button type="button" onClick={()=>{const value=!muted;setMuted(value);if(expandedRef.current)expandedRef.current.muted=value;}}
+              aria-label={muted?'開啟聲音':'靜音'} className="flex min-h-11 items-center rounded-full bg-white/15 px-3">
+              {muted?<VolumeX size={18}/>:<Volume2 size={18}/>}
+            </button>
+            <button type="button" onClick={()=>setLandscape(value=>!value)}
+              className="flex min-h-11 items-center gap-2 rounded-full bg-white/15 px-4 text-sm">
+              {landscape?<RotateCcw size={18}/>:<RotateCw size={18}/>}
+              {landscape?'返回直向':'橫向放大'}
+            </button>
+          </div>
+        </div>
+      </div>,document.body
+    )}
   </section>;
 }
