@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Cloud, ExternalLink, Play, X } from 'lucide-react';
+import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud } from 'lucide-react';
 import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
 import { cloudRead } from '../utils/driveCloud';
+import { getCachedVideo, putCachedVideo } from '../utils/videoCache';
+import { downloadForCache } from '../utils/downloadForCache';
 
 /** Cloud video references only. Google Drive handles streaming and access permissions. */
 type VideoRef = { id: string; size: number; mimeType: string; posterId?: string; width?: number; height?: number };
@@ -29,6 +31,14 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const [index,setIndex] = useState<VideoIndex|null>(()=>readIndex());
   const [actualPoster,setActualPoster] = useState('');
   const [viewerOpen,setViewerOpen] = useState(false);
+  const [loading,setLoading] = useState(false);
+  const [progress,setProgress] = useState(0);
+  const [playError,setPlayError] = useState('');
+  const [videoUrl,setVideoUrl] = useState('');
+  const [sourceLabel,setSourceLabel] = useState('');
+  const requestAbort=useRef<AbortController|null>(null);
+  const videoUrlRef=useRef('');
+  const playSequence=useRef(0);
   const [posterFailed,setPosterFailed] = useState(false);
   const requestRef = useRef(false);
   useEffect(()=>setPosterFailed(false),[posterSrc,actualPoster]);
@@ -87,20 +97,57 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const portrait = Boolean(video?.width && video?.height && video.height > video.width);
   const ratio = video?.width && video?.height ? `${video.width} / ${video.height}` : '16 / 9';
 
-  // Important: no fullscreen portal. Unmount the iframe when event/video changes or the user closes it.
-  useEffect(()=>{ setViewerOpen(false); },[stopId,video?.id]);
+  const stopPlayback=()=>{
+    playSequence.current++;
+    requestAbort.current?.abort();requestAbort.current=null;
+    setViewerOpen(false);setLoading(false);setPlayError('');setProgress(0);
+    if(videoUrlRef.current)URL.revokeObjectURL(videoUrlRef.current);
+    videoUrlRef.current='';setVideoUrl('');setSourceLabel('');
+  };
+  useEffect(()=>{stopPlayback();},[stopId,video?.id]);
+  useEffect(()=>()=>{
+    playSequence.current++;
+    requestAbort.current?.abort();
+    if(videoUrlRef.current)URL.revokeObjectURL(videoUrlRef.current);
+  },[]);
+  const play=async()=>{
+    if(!video||!available)return;
+    const sequence=++playSequence.current;
+    const abort=new AbortController();requestAbort.current=abort;
+    setViewerOpen(true);setLoading(true);setProgress(0);setPlayError('');
+    try{
+      let blob:Blob;
+      const cached=await getCachedVideo(video.id,Number(video.size)).catch(()=>null);
+      if(abort.signal.aborted||sequence!==playSequence.current)return;
+      if(cached){blob=cached.blob;setSourceLabel('已從手機快取播放');}
+      else{
+        setSourceLabel('首次下載中（下載完成後可重播）');
+        blob=await downloadForCache(stopId,Number(video.size),setProgress,abort.signal);
+        if(abort.signal.aborted||sequence!==playSequence.current)return;
+        const saved=await putCachedVideo({fileId:video.id,size:Number(video.size),mimeType:blob.type,blob,savedAt:Date.now()});
+        setSourceLabel(saved?'已儲存在手機快取':'播放準備完成（手機儲存空間不足，未能快取）');
+      }
+      if(abort.signal.aborted||sequence!==playSequence.current)return;
+      if(videoUrlRef.current)URL.revokeObjectURL(videoUrlRef.current);
+      const url=URL.createObjectURL(blob);videoUrlRef.current=url;setVideoUrl(url);
+    }catch(e){
+      if(!abort.signal.aborted&&sequence===playSequence.current)setPlayError(e instanceof Error?e.message:'無法下載影片');
+    }finally{
+      if(sequence===playSequence.current){setLoading(false);requestAbort.current=null;}
+    }
+  };
   useEffect(()=>{
-    if (!viewerOpen) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setViewerOpen(false); };
+    if(!viewerOpen)return;
+    const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape')stopPlayback();};
     window.addEventListener('keydown',onKey);
-    return () => window.removeEventListener('keydown',onKey);
+    return()=>window.removeEventListener('keydown',onKey);
   },[viewerOpen]);
 
   if (!available) return null;
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
     <div className="flex items-center gap-2 font-semibold text-[#203A7C] text-sm"><Cloud size={17}/>雲端回憶短片</div>
     {!viewerOpen ? (
-      <button type="button" onClick={()=>setViewerOpen(true)} className={`group relative block w-full ${portrait ? 'aspect-[4/5]' : 'aspect-video'} overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`} aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
+      <button type="button" onClick={()=>void play()} className={`group relative block w-full ${portrait ? 'aspect-[4/5]' : 'aspect-video'} overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`} aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
         {effectivePoster && !posterFailed ? <img src={effectivePoster} onError={()=>setPosterFailed(true)} alt={posterIsReal ? '影片實際畫面' : (posterTitle ? `${posterTitle} 活動封面` : '活動封面')} className={`absolute inset-0 h-full w-full ${posterIsReal ? 'object-contain' : 'object-cover'} transition-transform duration-200 group-active:scale-[1.02]`}/> : <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-br from-[#243B56] via-[#34596A] to-[#17243C]"/>}
         <span className="absolute inset-0 bg-black/30" aria-hidden="true"/>
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2"><span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/95 text-[#1F3FB0] shadow-lg"><Play size={29} fill="currentColor" className="ml-1"/></span><span className="rounded-full bg-black/55 px-3 py-1 text-sm font-semibold">播放回憶短片</span></span>
@@ -108,15 +155,22 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
         {effectivePoster && <span className="absolute bottom-3 left-3 rounded-lg bg-black/60 px-2 py-1 text-[10px]">{posterIsReal?'影片封面':'活動封面（尚無影片縮圖）'}</span>}
       </button>
     ) : (
-      <div className="space-y-2" aria-label="回憶短片頁內播放">
+      <div className="space-y-2" aria-label="回憶短片 HTML5 播放">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-xs font-semibold text-[#203A7C]">{posterTitle || '回憶短片'}</span>
-          <button type="button" onClick={()=>setViewerOpen(false)} className="inline-flex min-h-10 shrink-0 items-center gap-1 rounded-full bg-white px-3 py-2 text-xs text-[#203A7C] ring-1 ring-black/10" aria-label="收起影片"><X size={15}/>收起影片</button>
+          <button type="button" onClick={stopPlayback} className="inline-flex min-h-10 items-center gap-1 rounded-full bg-white px-3 py-2 text-xs text-[#203A7C] ring-1 ring-black/10"><X size={15}/>收起影片</button>
         </div>
-        <div className={`relative mx-auto w-full overflow-hidden rounded-xl bg-black ${portrait ? 'max-w-[340px]' : ''}`} style={{aspectRatio:ratio}}>
-          <iframe key={video!.id} src={previewUrl} title="Google Drive 雲端短片" allow="autoplay; fullscreen; picture-in-picture" allowFullScreen referrerPolicy="no-referrer-when-downgrade" className="absolute inset-0 h-full w-full border-0 bg-black"/>
-        </div>
-        <p className="text-center text-[11px] text-[#5B6070]">影片在行程內播放，不會自動全螢幕。Google Drive 的內建控制列仍由 Google 管理。</p>
+        {loading ? <div className="flex min-h-36 flex-col items-center justify-center gap-2 rounded-xl bg-[#19273A] p-4 text-white" role="status">
+          <Loader2 size={24} className="animate-spin"/><span className="text-sm">正在準備私人影片… {progress}%</span>
+          <span className="text-xs text-white/70">首次下載可能較慢；完成後將在這台手機快取。</span>
+          <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-white/20"><div className="h-full bg-white" style={{width:`${progress}%`}}/></div>
+        </div> : playError ? <div className="rounded-xl bg-red-50 p-3 space-y-2">
+          <p className="text-xs text-red-800" role="alert">{playError}</p>
+          <button type="button" onClick={()=>void play()} className="rounded-full bg-[#1F3FB0] px-3 py-2 text-xs text-white">重試下載</button>
+        </div> : videoUrl ? <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${portrait?'max-w-[360px]':''}`}>
+          <video key={videoUrl} src={videoUrl} controls playsInline autoPlay preload="metadata" className="block h-auto w-full max-h-[65dvh] object-contain" />
+        </div> : null}
+        {sourceLabel&&<p className="text-center text-[11px] text-[#5B6070]">{sourceLabel}</p>}
       </div>
     )}
     <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#1F3FB0] text-xs underline"><ExternalLink size={14}/>若內嵌播放失敗，請在 Google Drive 中開啟</a>
