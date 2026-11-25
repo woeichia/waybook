@@ -21,13 +21,18 @@ interface StopDetailSheetProps {
   onSaveGallery: (stopId: string, photos: string[]) => Promise<void>;
   onGalleryTick?: () => void;
   onMemorySound?: (kind: UiSoundKind) => void;
-  onClose: () => void;
+  onClose: (skipReverse?: boolean) => void;
   readOnly?: boolean;
 }
 
 export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onMemorySound, onClose, readOnly = false }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const eventScrollRef = useRef<HTMLDivElement>(null);
+  const eventHeaderRef = useRef<HTMLDivElement>(null);
+  const eventSheetRef = useRef<HTMLDivElement>(null);
+  const eventBackdropRef = useRef<HTMLDivElement>(null);
+  const edgeStateRef = useRef<{startX:number;startY:number;direction:'up'|'down'|null;amount:number;top:boolean;bottom:boolean}|null>(null);
   const [position, setPosition] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +50,8 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   useEffect(() => {
     setPosition(0); setError(null); setFullView(false);
     scrollRef.current?.scrollTo({ left: 0 });
+    eventScrollRef.current?.scrollTo({top:0,behavior:'instant'});
+    if(eventScrollRef.current)eventScrollRef.current.scrollTop=0;
   }, [stop?.id]);
 
   useEffect(() => {
@@ -80,6 +87,73 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     window.addEventListener('waybook:back', back);
     return () => window.removeEventListener('waybook:back', back);
   }, [stop?.id]);
+
+  // Motion test: dismiss only from a fresh gesture when event content is already at an edge.
+  // Nested photo and video interactions keep their own gestures.
+  useEffect(()=>{
+    if(!stop)return;
+    const panel=eventScrollRef.current;
+    const header=eventHeaderRef.current;
+    const sheet=eventSheetRef.current;
+    const backdrop=eventBackdropRef.current;
+    if(!panel||!header||!sheet||!backdrop)return;
+    let closing=false;
+    let releaseTimer:number|undefined;
+    const excluded='button,a,input,textarea,select,video,[contenteditable="true"],[role="slider"],[data-waybook-video-viewer],[data-waybook-memory-photo-viewer],.overflow-x-auto';
+    const touchStart=(e:TouchEvent)=>{
+      const el=e.target as Element;
+      const coverButton=el.closest('button[aria-label^="放大照片"]');
+      if(e.touches.length!==1||closing||(el.closest(excluded)&&!coverButton)){edgeStateRef.current=null;return;}
+      const t=e.touches[0];const bottom=panel.scrollHeight-panel.clientHeight-panel.scrollTop<=3;
+      edgeStateRef.current={startX:t.clientX,startY:t.clientY,direction:null,amount:0,top:panel.scrollTop<=3,bottom};
+    };
+    const touchMove=(e:TouchEvent)=>{
+      const state=edgeStateRef.current;
+      if(!state||e.touches.length!==1||closing)return;
+      const t=e.touches[0];const dx=t.clientX-state.startX,dy=t.clientY-state.startY;
+      if(!state.direction){
+        if(Math.abs(dx)>Math.abs(dy)*1.25&&Math.abs(dx)>18){edgeStateRef.current=null;return;}
+        if(Math.abs(dy)<10)return;
+        const dir=dy>0?'down':'up';
+        if(!((dir==='down'&&state.top)||(dir==='up'&&state.bottom))){edgeStateRef.current=null;return;}
+        state.direction=dir;
+      }
+      if(e.cancelable)e.preventDefault();
+      const amount=Math.max(0,state.direction==='down'?dy:-dy);
+      state.amount=amount;
+      const scale=1-Math.min(.38,amount/310);
+      const shift=(state.direction==='down'?1:-1)*amount*.72;
+      sheet.style.transition='none';
+      sheet.style.transform=`translateY(${shift}px) scale(${scale})`;
+      sheet.style.borderRadius=`${Math.min(45,24+amount*.1)}px`;
+      backdrop.style.backgroundColor=`rgba(0,0,0,${Math.max(.06,.55-amount/650)})`;
+    };
+    const touchEnd=()=>{
+      const state=edgeStateRef.current;edgeStateRef.current=null;
+      if(!state?.direction||closing)return;
+      if(state.amount>=115){
+        closing=true;
+        // Preserve last measured transform: fade directly, never grow then shrink.
+        sheet.style.transition='opacity 150ms ease-out';sheet.style.opacity='0';
+        backdrop.style.transition='background-color 150ms ease-out';backdrop.style.backgroundColor='transparent';
+        releaseTimer=window.setTimeout(()=>{onClose(true);},160);
+      }else{
+        sheet.style.transition='transform 280ms cubic-bezier(.2,.8,.2,1),border-radius 280ms';
+        sheet.style.transform='';sheet.style.borderRadius='';
+        backdrop.style.backgroundColor='';
+      }
+    };
+    for(const target of [panel,header]) target.addEventListener('touchstart',touchStart,{passive:true});
+    for(const target of [panel,header]) target.addEventListener('touchmove',touchMove,{passive:false});
+    for(const target of [panel,header]) target.addEventListener('touchend',touchEnd,{passive:true});
+    for(const target of [panel,header]) target.addEventListener('touchcancel',touchEnd,{passive:true});
+    return()=>{
+      if(releaseTimer!==undefined)clearTimeout(releaseTimer);
+      for(const target of [panel,header]) {target.removeEventListener('touchstart',touchStart);target.removeEventListener('touchmove',touchMove);
+      target.removeEventListener('touchend',touchEnd);target.removeEventListener('touchcancel',touchEnd);}
+      sheet.style.cssText='';backdrop.style.backgroundColor='';backdrop.style.transition='';
+    };
+  },[stop?.id]);
 
   const goTo = (next: number) => {
     const n = Math.min(Math.max(next, 0), imageCount - 1);
@@ -125,9 +199,9 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   };
 
   return <AnimatePresence>
-    {stop && <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
-      <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}} transition={{duration:0.22}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e=>e.stopPropagation()}>
-        <div className="relative shrink-0 bg-[#E5E2DC]">
+    {stop && <motion.div ref={eventBackdropRef} initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
+      <motion.div ref={eventSheetRef} initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}} transition={{duration:0.22}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+        <div ref={eventHeaderRef} className="relative shrink-0 bg-[#E5E2DC]">
           <div ref={scrollRef} className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none" style={{scrollbarWidth:'none'}} onScroll={e=>{const el=e.currentTarget; setPosition(Math.min(imageCount-1,Math.max(0,Math.round(el.scrollLeft/Math.max(1,el.clientWidth)))));}}>
             {imageCount ? images.map((src,i)=><button key={`${stop.id}-${i}`} type="button" className="w-full aspect-[5/3] shrink-0 snap-center overflow-hidden bg-[#DFDDD6]" onClick={()=>{setPosition(i);setFullView(true);}} aria-label={`放大照片 ${i+1}`}>
               <SmartImage src={src} alt={`${stop.title} 照片 ${i+1}`} category={stop.category} className="h-full w-full object-cover"/>
@@ -142,7 +216,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <span className="absolute top-3 left-3 rounded-full bg-black/50 text-white text-xs px-3 py-1 flex items-center gap-1.5"><Images className="w-3.5 h-3.5"/>{Math.min(position+1,Math.max(1,imageCount))}/{Math.max(1,imageCount)}</span>
           <button type="button" aria-label="關閉詳情" onClick={requestClose} className="absolute right-3 top-3 min-w-11 min-h-11 flex justify-center items-center rounded-full bg-white/95"><X className="w-5 h-5"/></button>
         </div>
-        <div className="p-5 sm:p-6 overflow-y-auto">
+        <div ref={eventScrollRef} className="p-5 sm:p-6 overflow-y-auto overscroll-contain">
           <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-xs text-[#5E5A52]"><Clock className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.time}</span><CategoryBadge category={stop.category}/></div>
           <h3 id="stop-detail-title" className="mt-2 font-calligraphy text-[26px] font-semibold text-[#1A1A1A]">{stop.title}</h3>
           <div className="mt-2 flex gap-1.5 text-xs text-[#5E5A52]"><MapPin className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.locationName}</div>

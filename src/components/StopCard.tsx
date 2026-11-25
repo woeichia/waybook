@@ -20,7 +20,10 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
   const mapsUrl = buildStopMapsUrl(stop.mapQuery);
 
   return (
-    <article data-waybook-stop-id={stop.id} ref={cardRef} className="rounded-3xl bg-[#F4F2ED] p-3.5 shadow-sm ring-1 ring-black/[0.06] transition-shadow duration-150 hover:shadow-md">
+    <article data-waybook-stop-id={stop.id} ref={cardRef} className="rounded-3xl bg-[#F4F2ED] p-3.5 shadow-sm ring-1 ring-black/[0.06] transition-[transform,box-shadow] duration-150 hover:shadow-md active:scale-[0.985] cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1F3FB0]"
+      tabIndex={0} role="group" aria-label={`活動：${stop.title}，按 Enter 開啟詳情`}
+      onClick={e=>{if(!(e.target as HTMLElement).closest('button,a'))openPostcard();}}
+      onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openPostcard();}}}>
       <div className="flex items-stretch gap-3.5">
         <button
           type="button"
@@ -69,6 +72,9 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
               <span className="truncate">{stop.locationName}</span>
             </span>
 
+            <div className="flex items-center gap-1.5 shrink-0">
+            <button type="button" aria-label={`放大 ${stop.title}`} onClick={openPostcard}
+              className="min-h-[36px] rounded-full bg-[#EDEBE6] text-[#1F3FB0] px-3 text-[11px] font-semibold active:scale-95">放大</button>
             <a
               href={mapsUrl}
               target="_blank"
@@ -78,6 +84,7 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
               <span>Directions</span>
               <ArrowUpRight className="w-3.5 h-3.5" />
             </a>
+            </div>
           </div>
         </div>
       </div>

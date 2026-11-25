@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
 import type { ItineraryDay } from '../types/itinerary';
 import { buildFullDayMapsUrl, buildStopMapsUrl } from '../utils/itinerary';
@@ -10,6 +11,7 @@ interface DayRouteViewProps {
 
 export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
   const fullDayMapsUrl = buildFullDayMapsUrl(day.stops);
+  const reducedMotion = useReducedMotion();
 
   if (day.stops.length === 0) {
     return (
@@ -42,13 +44,21 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
             return (
               <li key={stop.id} className="relative flex gap-3.5">
                 <div className="flex flex-col items-center">
-                  <div className="w-7 h-7 rounded-full bg-[#1F3FB0] text-white text-xs font-semibold flex items-center justify-center shrink-0 tabular-nums z-10 shadow-xs">
+                  <motion.div initial={reducedMotion?false:{opacity:0,scale:0.68}} animate={{opacity:1,scale:1}}
+                    transition={{duration:0.28,delay:reducedMotion?0:idx*0.11,ease:[0.2,0.8,0.2,1]}}
+                    className="w-7 h-7 rounded-full bg-[#1F3FB0] text-white text-xs font-semibold flex items-center justify-center shrink-0 tabular-nums z-10 shadow-xs">
                     {idx + 1}
-                  </div>
-                  {!isLast && <div className="w-px flex-1 bg-[#D2CEC4] my-1.5 min-h-[28px]" />}
+                  </motion.div>
+                  {!isLast && <div className="w-px flex-1 bg-[#D2CEC4] my-1.5 min-h-[28px] relative overflow-hidden">
+                    <motion.div className="absolute inset-0 bg-[#1F3FB0] origin-top"
+                      initial={reducedMotion?false:{scaleY:0}} animate={{scaleY:1}}
+                      transition={{duration:0.35,delay:reducedMotion?0:idx*0.11+0.12,ease:'easeOut'}} />
+                  </div>}
                 </div>
 
-                <div className={`min-w-0 flex-1 ${isLast ? 'pb-1' : 'pb-5'}`}>
+                <motion.div initial={reducedMotion?false:{opacity:0,y:8}} animate={{opacity:1,y:0}}
+                  transition={{duration:0.3,delay:reducedMotion?0:idx*0.11,ease:'easeOut'}}
+                  className={`min-w-0 flex-1 ${isLast ? 'pb-1' : 'pb-5'}`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -79,7 +89,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                       {stop.transitToNext.trim() || '前往下一站'}
                     </div>
                   )}
-                </div>
+                </motion.div>
               </li>
             );
           })}

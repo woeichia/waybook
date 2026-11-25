@@ -76,12 +76,12 @@ export default function App() {
     selectedSourceRef.current = context;
     setPostcardMotion(context);
   };
-  const closePostcard = () => {
+  const closePostcard = (skipReverse = false) => {
     if (!selectedStopRef.current || postcardMotion) return;
     const original = selectedSourceRef.current;
     selectedStopRef.current = null;
     setSelectedStop(null);
-    if (original && original.stop.id === selectedStop?.id && viewMode === 'timeline') {
+    if (!skipReverse && original && original.stop.id === selectedStop?.id && viewMode === 'timeline') {
       // Re-measure in case the vertical list moved while the detail sheet was open.
       const card = Array.from(document.querySelectorAll<HTMLElement>('[data-waybook-stop-id]'))
         .find(node => node.dataset.waybookStopId === original.stop.id);
@@ -487,6 +487,17 @@ export default function App() {
     }
   };
 
+  // Motion trial: horizontal day swipe uses the same day selection and history as a day tab.
+  const motionSwipeRef = React.useRef<{x:number;y:number}|null>(null);
+  const motionDaySwipe = (deltaX: number, deltaY: number) => {
+    if (Math.abs(deltaX) < 85 || Math.abs(deltaX) < Math.abs(deltaY)*1.6) return;
+    if (selectedStopRef.current || postcardMotion || isEditOpen || isShareOpen) return;
+    const next = selectedDayIndex + (deltaX < 0 ? 1 : -1);
+    if (next < 0 || next >= itinerary.days.length) return;
+    // DaySelector normally pushes this history on day-tab clicks; swipes must do the same.
+    window.history.pushState({waybookNav:true,day:next,layer:'day'},'',window.location.href);
+    handleSelectDay(next);
+  };
   const activeDay = itinerary.days[selectedDayIndex] ?? itinerary.days[0];
 
   return (
@@ -554,15 +565,27 @@ export default function App() {
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
-            <div className="mt-5">
+            <div className="mt-5" style={{perspective:'1100px'}}
+              onTouchStart={e=>{
+                const el=e.target as HTMLElement;
+                // Avoid hijacking photos, Maps, buttons, editors and left-edge browser Back.
+                if(e.touches.length!==1 || e.touches[0].clientX<35 || el.closest('button,a,input,textarea,select,video,[data-waybook-video-viewer],[data-waybook-event-viewer],[role="dialog"]')) {motionSwipeRef.current=null;return;}
+                motionSwipeRef.current={x:e.touches[0].clientX,y:e.touches[0].clientY};
+              }}
+              onTouchEnd={e=>{
+                const start=motionSwipeRef.current;motionSwipeRef.current=null;
+                if(!start||e.changedTouches.length!==1)return;
+                motionDaySwipe(e.changedTouches[0].clientX-start.x,e.changedTouches[0].clientY-start.y);
+              }}
+              onTouchCancel={()=>{motionSwipeRef.current=null;}}>
               <AnimatePresence mode="wait" initial={false}>
                 {activeDay && viewMode === 'timeline' && (
                   <motion.div
                     key={`timeline-${selectedDayIndex}-${activeDay.dayNumber}`}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.22, ease: TACTILE_EASE }}
+                    initial={{ opacity: 0, x: dayDirection * 30, rotateY: dayDirection * -26, scale: 0.97 }}
+                    animate={{ opacity: 1, x: 0, rotateY: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: dayDirection * -26, rotateY: dayDirection * 24, scale: 0.97 }}
+                    transition={{ duration: 0.33, ease: TACTILE_EASE }}
                   >
                     {activeDay.stops.length === 0 ? (
                       <div className="rounded-3xl bg-[#F4F2ED] p-8 text-center shadow-sm ring-1 ring-black/[0.06]">
@@ -594,10 +617,10 @@ export default function App() {
                 {activeDay && viewMode === 'route' && (
                   <motion.div
                     key={`route-${selectedDayIndex}-${activeDay.dayNumber}`}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.22, ease: TACTILE_EASE }}
+                    initial={{ opacity: 0, x: dayDirection * 30, rotateY: dayDirection * -26, scale: 0.97 }}
+                    animate={{ opacity: 1, x: 0, rotateY: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: dayDirection * -26, rotateY: dayDirection * 24, scale: 0.97 }}
+                    transition={{ duration: 0.33, ease: TACTILE_EASE }}
                   >
                     <DayRouteView day={activeDay} />
                   </motion.div>
