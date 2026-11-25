@@ -234,7 +234,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
     <div className="flex items-center gap-2 font-semibold text-[#203A7C] text-sm"><Cloud size={17}/>雲端回憶短片</div>
     {!viewerOpen ? (
-      <button type="button" onClick={()=>void play()} className={`group relative block w-full ${portrait ? 'aspect-[4/5]' : 'aspect-video'} overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`} aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
+      <button type="button" data-motion-video-poster onClick={()=>void play()} style={{touchAction:'pan-y'}} className={`group relative block w-full ${portrait ? 'aspect-[4/5]' : 'aspect-video'} overflow-hidden rounded-2xl bg-[#25364D] text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`} aria-label={`播放雲端短片${posterTitle ? '：'+posterTitle : ''}`}>
         {effectivePoster && !posterFailed ? <img src={effectivePoster} onError={()=>setPosterFailed(true)} alt={posterIsReal ? '影片實際畫面' : (posterTitle ? `${posterTitle} 活動封面` : '活動封面')} className={`absolute inset-0 h-full w-full ${posterIsReal ? 'object-contain' : 'object-cover'} transition-transform duration-200 group-active:scale-[1.02]`}/> : <div aria-hidden="true" className="absolute inset-0 bg-gradient-to-br from-[#243B56] via-[#34596A] to-[#17243C]"/>}
         <span className="absolute inset-0 bg-black/30" aria-hidden="true"/>
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2"><span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/95 text-[#1F3FB0] shadow-lg"><Play size={29} fill="currentColor" className="ml-1"/></span><span className="rounded-full bg-black/55 px-3 py-1 text-sm font-semibold">播放回憶短片</span></span>
@@ -256,7 +256,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
           <button type="button" onClick={()=>void play()} className="rounded-full bg-[#1F3FB0] px-3 py-2 text-xs text-white">重試下載</button>
         </div> : videoUrl ? <div className="space-y-2">
           <div className={`mx-auto w-full overflow-hidden rounded-xl bg-black ${portrait?'max-w-[360px]':''}`}>
-            <video ref={inlineRef} key={videoUrl} src={videoUrl} controls playsInline autoPlay preload="metadata"
+            <video data-motion-inline-video style={{touchAction:'pan-y'}} ref={inlineRef} key={videoUrl} src={videoUrl} controls playsInline autoPlay preload="metadata"
               controlsList="nofullscreen" disablePictureInPicture
               className="block h-auto w-full max-h-[65dvh] object-contain" />
           </div>

@@ -80,9 +80,9 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     const oldOverflow=document.body.style.overflow;
     document.body.style.overflow='hidden';
     panel.scrollTop=0;
-    const duration=reduced()?0:360;
-    animationRef.current=panel.animate([{transform:cardTransform(panel,true),borderRadius:'24px',opacity:0},{opacity:1,offset:.18},{transform:'none',opacity:1}],{duration,easing:'cubic-bezier(.22,.8,.24,1)'});
-    backdropAnimationRef.current=backdrop.animate([{backgroundColor:'transparent',backdropFilter:'blur(0px)'},{backgroundColor:'rgba(0,0,0,.55)',backdropFilter:'blur(4px)'}],{duration,easing:'ease-out'});
+    const duration=reduced()?0:300;
+    animationRef.current=panel.animate([{transform:cardTransform(panel,true),opacity:0},{opacity:1,offset:.18},{transform:'none',opacity:1}],{duration,easing:'cubic-bezier(.22,.8,.24,1)'});
+    backdropAnimationRef.current=backdrop.querySelector<HTMLElement>('[data-motion-scrim]')!.animate([{opacity:0},{opacity:1}],{duration,easing:'ease-out'});
     return()=>{animationRef.current?.cancel();backdropAnimationRef.current?.cancel();document.body.style.overflow=oldOverflow;};
   },[stop?.id]);
   const finishClose = () => {
@@ -91,16 +91,15 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     const panel=eventSheetRef.current, backdrop=eventBackdropRef.current;
     if(!panel||!backdrop){onCloseRef.current();return;}
     const current=getComputedStyle(panel).transform;
-    const currentRadius=getComputedStyle(panel).borderRadius;
     const currentOpacity=getComputedStyle(panel).opacity;
-    const shade=getComputedStyle(backdrop).backgroundColor;
-    const blur=getComputedStyle(backdrop).backdropFilter;
+    const scrim=backdrop.querySelector<HTMLElement>('[data-motion-scrim]')!;
+    const shade=getComputedStyle(scrim).opacity;
     animationRef.current?.cancel();backdropAnimationRef.current?.cancel();
     panel.style.transition='none';panel.style.transform=current;
     const target=cardTransform(panel);
-    const duration=reduced()?0:380;
-    animationRef.current=panel.animate([{transform:current,borderRadius:currentRadius,opacity:Number(currentOpacity)},{opacity:1,offset:.8},{transform:target,borderRadius:'24px',opacity:0}],{duration,easing:'cubic-bezier(.22,.8,.24,1)',fill:'forwards'});
-    backdropAnimationRef.current=backdrop.animate([{backgroundColor:shade,backdropFilter:blur},{backgroundColor:'transparent',backdropFilter:'blur(0px)'}],{duration,easing:'ease-out',fill:'forwards'});
+    const duration=reduced()?0:310;
+    animationRef.current=panel.animate([{transform:current,opacity:Number(currentOpacity)},{opacity:1,offset:.8},{transform:target,opacity:0}],{duration,easing:'cubic-bezier(.22,.8,.24,1)',fill:'forwards'});
+    backdropAnimationRef.current=scrim.animate([{opacity:Number(shade)},{opacity:0}],{duration,easing:'ease-out',fill:'forwards'});
     animationRef.current.finished.then(()=>onCloseRef.current()).catch(()=>{});
   };
   const closeActionRef=useRef(finishClose);closeActionRef.current=finishClose;
@@ -161,11 +160,25 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     const updateClose=()=>{if(floatingClose)floatingClose.style.visibility=panel.scrollTop>60?'visible':'hidden';};
     panel.addEventListener('scroll',updateClose,{passive:true});updateClose();
 
+    const scrim=backdrop.querySelector<HTMLElement>('[data-motion-scrim]')!;
+    let frame=0, width=0, height=0;
+    const cancelFrame=()=>{if(frame)cancelAnimationFrame(frame);frame=0;};
+    const renderDrag=()=>{
+      frame=0;const state=edgeStateRef.current;if(!state?.direction)return;
+      const amount=state.amount,scale=1-Math.min(.18,amount/950);
+      const shift=(state.direction==='down'?1:-1)*amount*.48;
+      sheet.style.transform=`translate3d(${width*(1-scale)/2}px, ${shift+height*(1-scale)/2}px, 0) scale(${scale})`;
+      scrim.style.opacity=String(Math.max(.06,.55-amount/650)/.55);
+    };
     const excluded='button,a,input,textarea,select,video,[contenteditable="true"],[role="slider"],[data-waybook-video-viewer],[data-waybook-memory-photo-viewer],[data-waybook-ref-photo-viewer],.overflow-x-auto';
     const touchStart=(e:TouchEvent)=>{
       const el=e.target as Element;
       const coverButton=el.closest('button[aria-label^="放大照片"]');
-      if(e.touches.length!==1||closingRef.current||pendingBackRef.current||(el.closest(excluded)&&!coverButton)){edgeStateRef.current=null;return;}
+      const videoPoster=el.closest('[data-motion-video-poster]');
+      const inlineVideo=el.closest<HTMLVideoElement>('video[data-motion-inline-video]');
+      // Reserve the lower portion of the native player for seek/play controls.
+      const videoSurface=inlineVideo && e.touches[0] && e.touches[0].clientY < inlineVideo.getBoundingClientRect().bottom-Math.min(80,inlineVideo.clientHeight*.4);
+      if(e.touches.length!==1||closingRef.current||pendingBackRef.current||(el.closest(excluded)&&!coverButton&&!videoPoster&&!videoSurface)){edgeStateRef.current=null;return;}
       const t=e.touches[0];if(t.clientX<=35){edgeStateRef.current=null;return;}const bottom=panel.scrollHeight-panel.clientHeight-panel.scrollTop<=3;
       edgeStateRef.current={startX:t.clientX,startY:t.clientY,direction:null,amount:0,top:panel.scrollTop<=3,bottom};
     };
@@ -179,40 +192,38 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
         const dir=dy>0?'down':'up';
         if(!((dir==='down'&&state.top)||(dir==='up'&&state.bottom))){edgeStateRef.current=null;return;}
         state.direction=dir;
+        width=sheet.clientWidth;height=sheet.clientHeight;
+        animationRef.current?.cancel();backdropAnimationRef.current?.cancel();
+        sheet.style.transition='none';scrim.style.transition='none';
       }
       if(e.cancelable)e.preventDefault();
       suppressClickUntil.current=Date.now()+450;
-      animationRef.current?.cancel();backdropAnimationRef.current?.cancel();
-      const amount=Math.max(0,state.direction==='down'?dy:-dy);
-      state.amount=amount;
-      const scale=1-Math.min(.18,amount/950);
-      const shift=(state.direction==='down'?1:-1)*amount*.48;
-      sheet.style.transition='none';
-      sheet.style.transform=`translate(${sheet.clientWidth*(1-scale)/2}px, ${shift+sheet.clientHeight*(1-scale)/2}px) scale(${scale})`;
-      sheet.style.borderRadius=`${Math.min(45,24+amount*.1)}px`;
-      backdrop.style.transition='none';backdrop.style.backgroundColor=`rgba(0,0,0,${Math.max(.06,.55-amount/650)})`;
+      state.amount=Math.max(0,state.direction==='down'?dy:-dy);
+      if(!frame)frame=requestAnimationFrame(renderDrag);
     };
     const touchEnd=()=>{
+      if(frame){cancelFrame();renderDrag();}
       const state=edgeStateRef.current;edgeStateRef.current=null;
       if(!state?.direction||closingRef.current||pendingBackRef.current)return;
       if(state.amount>=160){
         requestCloseRef.current();
       }else{
-        sheet.style.transition='transform 280ms cubic-bezier(.2,.8,.2,1),border-radius 280ms';
+        sheet.style.transition='transform 260ms cubic-bezier(.2,.8,.2,1)';
         sheet.style.transform='';sheet.style.borderRadius='';
-        backdrop.style.transition='background-color 280ms ease-out';backdrop.style.backgroundColor='';
+        scrim.style.transition='opacity 260ms ease-out';scrim.style.opacity='';
       }
     };
     for(const target of [panel]) target.addEventListener('touchstart',touchStart,{passive:true});
     for(const target of [panel]) target.addEventListener('touchmove',touchMove,{passive:false});
     for(const target of [panel]) target.addEventListener('touchend',touchEnd,{passive:true});
-    const touchCancel=()=>{edgeStateRef.current=null;if(closingRef.current||pendingBackRef.current)return;
-      sheet.style.transition='transform 280ms cubic-bezier(.2,.8,.2,1),border-radius 280ms';
-      sheet.style.transform='';sheet.style.borderRadius='';backdrop.style.transition='background-color 280ms ease-out';backdrop.style.backgroundColor='';};
+    const touchCancel=()=>{cancelFrame();edgeStateRef.current=null;if(closingRef.current||pendingBackRef.current)return;
+      sheet.style.transition='transform 260ms cubic-bezier(.2,.8,.2,1)';
+      sheet.style.transform='';sheet.style.borderRadius='';scrim.style.transition='opacity 260ms ease-out';scrim.style.opacity='';};
     for(const target of [panel]) target.addEventListener('touchcancel',touchCancel,{passive:true});
     return()=>{
       for(const target of [panel]) {target.removeEventListener('touchstart',touchStart);target.removeEventListener('touchmove',touchMove);
       target.removeEventListener('touchend',touchEnd);target.removeEventListener('touchcancel',touchCancel);}
+      cancelFrame();scrim.style.opacity='';scrim.style.transition='';
       panel.removeEventListener('scroll',updateClose);sheet.style.transform='';sheet.style.transition='';sheet.style.borderRadius='';sheet.style.opacity='';sheet.style.overflowY=priorOverflowY;sheet.style.overscrollBehaviorY=priorOverscroll;backdrop.style.backgroundColor='';backdrop.style.transition='';
     };
   },[stop?.id]);
@@ -252,8 +263,9 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   };
 
   return <>
-    {stop && <div ref={eventBackdropRef} style={{backdropFilter:'blur(4px)'}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
-      <div ref={eventSheetRef} style={{transformOrigin:'top left'}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClickCapture={e=>{if(Date.now()<suppressClickUntil.current||closingRef.current||pendingBackRef.current){e.preventDefault();e.stopPropagation();}}} onClick={e=>e.stopPropagation()}>
+    {stop && <div ref={eventBackdropRef} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
+      <div data-motion-scrim aria-hidden="true" className="absolute inset-0 bg-black/55 pointer-events-none" style={{willChange:'opacity'}}/>
+      <div ref={eventSheetRef} style={{transformOrigin:'top left',willChange:'transform, opacity'}} className="relative w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClickCapture={e=>{if(Date.now()<suppressClickUntil.current||closingRef.current||pendingBackRef.current){e.preventDefault();e.stopPropagation();}}} onClick={e=>e.stopPropagation()}>
         <div className="sticky top-0 z-50 h-0 shrink-0 pointer-events-none">
               <button type="button" data-motion-v2-close aria-label="關閉活動詳情" onClick={requestClose} className="pointer-events-auto absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white shadow-md" style={{touchAction:'manipulation',visibility:'hidden'}}>
                 <span aria-hidden="true" className="text-2xl leading-none">×</span>
