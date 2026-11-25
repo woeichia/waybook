@@ -489,9 +489,11 @@ export default function App() {
 
   // Motion trial: horizontal day swipe uses the same day selection and history as a day tab.
   const motionSwipeRef = React.useRef<{x:number;y:number}|null>(null);
+  const motionSuppressClickUntil = React.useRef(0);
   const motionDaySwipe = (deltaX: number, deltaY: number) => {
     if (Math.abs(deltaX) < 85 || Math.abs(deltaX) < Math.abs(deltaY)*1.6) return;
     if (selectedStopRef.current || postcardMotion || isEditOpen || isShareOpen) return;
+    motionSuppressClickUntil.current=Date.now()+500;
     const next = selectedDayIndex + (deltaX < 0 ? 1 : -1);
     if (next < 0 || next >= itinerary.days.length) return;
     // DaySelector normally pushes this history on day-tab clicks; swipes must do the same.
@@ -565,19 +567,21 @@ export default function App() {
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
-            <div className="mt-5" style={{perspective:'1100px'}}
-              onTouchStart={e=>{
+            <div className="mt-5" style={{perspective:'1100px',touchAction:'pan-y pinch-zoom'}}
+              onClickCapture={e=>{if(Date.now()<motionSuppressClickUntil.current){e.preventDefault();e.stopPropagation();}}}
+              onTouchStartCapture={e=>{
+                motionSuppressClickUntil.current=0;
                 const el=e.target as HTMLElement;
-                // Avoid hijacking photos, Maps, buttons, editors and left-edge browser Back.
-                if(e.touches.length!==1 || e.touches[0].clientX<35 || el.closest('button,a,input,textarea,select,video,[data-waybook-video-viewer],[data-waybook-event-viewer],[role="dialog"]')) {motionSwipeRef.current=null;return;}
+                // Card buttons and cover images participate in day swipes; native controls and viewers do not.
+                if(e.touches.length!==1 || e.touches[0].clientX<35 || el.closest('a,input,textarea,select,video,[contenteditable="true"],[role="slider"],[data-waybook-video-viewer],[data-waybook-event-viewer],[data-waybook-memory-photo-viewer],[role="dialog"],.overflow-x-auto')) {motionSwipeRef.current=null;return;}
                 motionSwipeRef.current={x:e.touches[0].clientX,y:e.touches[0].clientY};
               }}
-              onTouchEnd={e=>{
+              onTouchEndCapture={e=>{
                 const start=motionSwipeRef.current;motionSwipeRef.current=null;
                 if(!start||e.changedTouches.length!==1)return;
                 motionDaySwipe(e.changedTouches[0].clientX-start.x,e.changedTouches[0].clientY-start.y);
               }}
-              onTouchCancel={()=>{motionSwipeRef.current=null;}}>
+              onTouchCancelCapture={()=>{motionSwipeRef.current=null;}}>
               <AnimatePresence mode="wait" initial={false}>
                 {activeDay && viewMode === 'timeline' && (
                   <motion.div

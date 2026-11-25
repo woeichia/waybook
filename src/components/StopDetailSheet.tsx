@@ -28,7 +28,6 @@ interface StopDetailSheetProps {
 export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onMemorySound, onClose, readOnly = false }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const eventScrollRef = useRef<HTMLDivElement>(null);
   const eventHeaderRef = useRef<HTMLDivElement>(null);
   const eventSheetRef = useRef<HTMLDivElement>(null);
   const eventBackdropRef = useRef<HTMLDivElement>(null);
@@ -50,8 +49,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   useEffect(() => {
     setPosition(0); setError(null); setFullView(false);
     scrollRef.current?.scrollTo({ left: 0 });
-    eventScrollRef.current?.scrollTo({top:0,behavior:'instant'});
-    if(eventScrollRef.current)eventScrollRef.current.scrollTop=0;
+    if(eventSheetRef.current)eventSheetRef.current.scrollTop=0;
   }, [stop?.id]);
 
   useEffect(() => {
@@ -92,11 +90,18 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   // Nested photo and video interactions keep their own gestures.
   useEffect(()=>{
     if(!stop)return;
-    const panel=eventScrollRef.current;
+    const panel=eventSheetRef.current;
     const header=eventHeaderRef.current;
     const sheet=eventSheetRef.current;
     const backdrop=eventBackdropRef.current;
     if(!panel||!header||!sheet||!backdrop)return;
+    const priorOverflowY=sheet.style.overflowY;
+    const priorOverscroll=sheet.style.overscrollBehaviorY;
+    sheet.style.overflowY='auto';
+    sheet.style.overscrollBehaviorY='contain';
+    const floatingClose=sheet.querySelector<HTMLElement>('[data-motion-v2-close]');
+    const updateClose=()=>{if(floatingClose)floatingClose.style.visibility=panel.scrollTop>60?'visible':'hidden';};
+    panel.addEventListener('scroll',updateClose,{passive:true});updateClose();
     let closing=false;
     let releaseTimer:number|undefined;
     const excluded='button,a,input,textarea,select,video,[contenteditable="true"],[role="slider"],[data-waybook-video-viewer],[data-waybook-memory-photo-viewer],.overflow-x-auto';
@@ -121,8 +126,8 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
       if(e.cancelable)e.preventDefault();
       const amount=Math.max(0,state.direction==='down'?dy:-dy);
       state.amount=amount;
-      const scale=1-Math.min(.38,amount/310);
-      const shift=(state.direction==='down'?1:-1)*amount*.72;
+      const scale=1-Math.min(.18,amount/950);
+      const shift=(state.direction==='down'?1:-1)*amount*.48;
       sheet.style.transition='none';
       sheet.style.transform=`translateY(${shift}px) scale(${scale})`;
       sheet.style.borderRadius=`${Math.min(45,24+amount*.1)}px`;
@@ -131,7 +136,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
     const touchEnd=()=>{
       const state=edgeStateRef.current;edgeStateRef.current=null;
       if(!state?.direction||closing)return;
-      if(state.amount>=115){
+      if(state.amount>=160){
         closing=true;
         // Preserve last measured transform: fade directly, never grow then shrink.
         sheet.style.transition='opacity 150ms ease-out';sheet.style.opacity='0';
@@ -143,15 +148,18 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
         backdrop.style.backgroundColor='';
       }
     };
-    for(const target of [panel,header]) target.addEventListener('touchstart',touchStart,{passive:true});
-    for(const target of [panel,header]) target.addEventListener('touchmove',touchMove,{passive:false});
-    for(const target of [panel,header]) target.addEventListener('touchend',touchEnd,{passive:true});
-    for(const target of [panel,header]) target.addEventListener('touchcancel',touchEnd,{passive:true});
+    for(const target of [panel]) target.addEventListener('touchstart',touchStart,{passive:true});
+    for(const target of [panel]) target.addEventListener('touchmove',touchMove,{passive:false});
+    for(const target of [panel]) target.addEventListener('touchend',touchEnd,{passive:true});
+    const touchCancel=()=>{edgeStateRef.current=null;if(closing)return;
+      sheet.style.transition='transform 280ms cubic-bezier(.2,.8,.2,1),border-radius 280ms';
+      sheet.style.transform='';sheet.style.borderRadius='';backdrop.style.backgroundColor='';};
+    for(const target of [panel]) target.addEventListener('touchcancel',touchCancel,{passive:true});
     return()=>{
       if(releaseTimer!==undefined)clearTimeout(releaseTimer);
-      for(const target of [panel,header]) {target.removeEventListener('touchstart',touchStart);target.removeEventListener('touchmove',touchMove);
-      target.removeEventListener('touchend',touchEnd);target.removeEventListener('touchcancel',touchEnd);}
-      sheet.style.cssText='';backdrop.style.backgroundColor='';backdrop.style.transition='';
+      for(const target of [panel]) {target.removeEventListener('touchstart',touchStart);target.removeEventListener('touchmove',touchMove);
+      target.removeEventListener('touchend',touchEnd);target.removeEventListener('touchcancel',touchCancel);}
+      panel.removeEventListener('scroll',updateClose);sheet.style.transform='';sheet.style.transition='';sheet.style.borderRadius='';sheet.style.opacity='';sheet.style.overflowY=priorOverflowY;sheet.style.overscrollBehaviorY=priorOverscroll;backdrop.style.backgroundColor='';backdrop.style.transition='';
     };
   },[stop?.id]);
 
@@ -201,7 +209,12 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
   return <AnimatePresence>
     {stop && <motion.div ref={eventBackdropRef} initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/55 backdrop-blur-sm p-0 sm:p-4" onClick={requestClose} data-waybook-event-viewer role="dialog" aria-modal="true" aria-labelledby="stop-detail-title">
       <motion.div ref={eventSheetRef} initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}} transition={{duration:0.22}} className="w-full max-w-[480px] rounded-t-3xl sm:rounded-3xl bg-[#F4F2ED] overflow-hidden shadow-2xl max-h-[92vh] flex flex-col" onClick={e=>e.stopPropagation()}>
-        <div ref={eventHeaderRef} className="relative shrink-0 bg-[#E5E2DC]">
+        <div className="sticky top-0 z-50 h-0 shrink-0 pointer-events-none">
+              <button type="button" data-motion-v2-close aria-label="關閉活動詳情" onClick={()=>onClose()} className="pointer-events-auto absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white shadow-md" style={{touchAction:'manipulation',visibility:'hidden'}}>
+                <span aria-hidden="true" className="text-2xl leading-none">×</span>
+              </button>
+            </div>
+            <div ref={eventHeaderRef} className="relative shrink-0 bg-[#E5E2DC]">
           <div ref={scrollRef} className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none" style={{scrollbarWidth:'none'}} onScroll={e=>{const el=e.currentTarget; setPosition(Math.min(imageCount-1,Math.max(0,Math.round(el.scrollLeft/Math.max(1,el.clientWidth)))));}}>
             {imageCount ? images.map((src,i)=><button key={`${stop.id}-${i}`} type="button" className="w-full aspect-[5/3] shrink-0 snap-center overflow-hidden bg-[#DFDDD6]" onClick={()=>{setPosition(i);setFullView(true);}} aria-label={`放大照片 ${i+1}`}>
               <SmartImage src={src} alt={`${stop.title} 照片 ${i+1}`} category={stop.category} className="h-full w-full object-cover"/>
@@ -216,7 +229,7 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <span className="absolute top-3 left-3 rounded-full bg-black/50 text-white text-xs px-3 py-1 flex items-center gap-1.5"><Images className="w-3.5 h-3.5"/>{Math.min(position+1,Math.max(1,imageCount))}/{Math.max(1,imageCount)}</span>
           <button type="button" aria-label="關閉詳情" onClick={requestClose} className="absolute right-3 top-3 min-w-11 min-h-11 flex justify-center items-center rounded-full bg-white/95"><X className="w-5 h-5"/></button>
         </div>
-        <div ref={eventScrollRef} className="p-5 sm:p-6 overflow-y-auto overscroll-contain">
+        <div className="p-5 sm:p-6 shrink-0 overflow-visible">
           <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-1.5 text-xs text-[#5E5A52]"><Clock className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.time}</span><CategoryBadge category={stop.category}/></div>
           <h3 id="stop-detail-title" className="mt-2 font-calligraphy text-[26px] font-semibold text-[#1A1A1A]">{stop.title}</h3>
           <div className="mt-2 flex gap-1.5 text-xs text-[#5E5A52]"><MapPin className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.locationName}</div>
