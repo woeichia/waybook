@@ -1,8 +1,9 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", "Heiti TC", "Segoe UI", sans-serif;
-  --font-display: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  --font-sans: "Noto Sans TC", "Noto Sans SC", "Microsoft JhengHei", "PingFang TC", "Heiti TC", "Segoe UI", sans-serif;
+  --font-display: "Noto Sans TC", "Noto Sans SC", "Microsoft JhengHei", "PingFang TC", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -14,21 +15,15 @@
     scroll-behavior: smooth;
   }
 
+  body, button, input, textarea, select {
+    font-family: var(--font-sans);
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    html {
-      scroll-behavior: auto;
-    }
+    html { scroll-behavior: auto; }
   }
 }
 
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-/* Legacy class retained so all existing headings use the same complete Traditional Chinese font. */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .font-calligraphy { font-family: var(--font-sans); font-weight: 700; letter-spacing: .015em; }

@@ -229,7 +229,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
         </>}
       </div>
 
-      <div className="rounded-2xl bg-[#F8F4EA] ring-1 ring-black/8 p-3 space-y-2">
+      {!readOnly && <div className="rounded-2xl bg-[#F8F4EA] ring-1 ring-black/8 p-3 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="text-xs font-semibold text-[#38342F]">目前選取</p>
@@ -241,12 +241,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
           </div>
         </div>
 
-        {activePhoto && (readOnly ? <>
-          <p className="text-sm text-[#3A352E]">{activePhoto.caption?.trim() || '這張回憶照片尚未加入說明。'}</p>
-          <button type="button" onClick={()=>{onSound?.('whoosh');setSelected(active);}} className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium ring-1 ring-black/10">
-            <Expand className="w-3.5 h-3.5"/>查看大圖
-          </button>
-        </> : <>
+        {activePhoto && <>
           <label className="block text-xs text-[#5E5A52]">照片說明</label>
           <textarea
             key={`${stopId}-${active}-${activePhoto.caption}`}
@@ -262,8 +257,8 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
             <button disabled={busy} type="button" className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-red-700 ring-1 ring-red-200 disabled:opacity-30" onClick={()=>{onSound?.('tap'); if(window.confirm('確定刪除這張回憶照片？')) void change(photos.filter((_,j)=>j!==active)); }}><Trash2 className="w-3.5 h-3.5"/>刪除這張</button>
             <button type="button" onClick={()=>{onSound?.('whoosh');setSelected(active);}} className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium ring-1 ring-black/10"><Expand className="w-3.5 h-3.5"/>查看大圖</button>
           </div>
-        </>)}
-      </div>
+        </>}
+      </div>}
     </> : <div className="rounded-2xl bg-[#F8F4EA] ring-1 ring-black/8 px-4 py-5 text-center text-sm text-[#5E5A52]">還沒有旅途回憶照片。</div>}
 
     {!readOnly && <>
