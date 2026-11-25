@@ -29,7 +29,7 @@ export const DaySelector: React.FC<DaySelectorProps> = ({days,selectedDayIndex,d
   // Preserve the tested Android browser-history navigation exactly.
   useEffect(() => {
     const state = window.history.state;
-    if (!state?.waybookNav) {
+    if (!state?.waybookNav || state.layer !== 'day') {
       window.history.replaceState({ ...(state && typeof state === 'object' ? state : {}), waybookNav: true, day: currentDayRef.current, layer: 'day' }, '', window.location.href);
     }
     const onClickCapture = (e: MouseEvent) => {
@@ -45,13 +45,9 @@ export const DaySelector: React.FC<DaySelectorProps> = ({days,selectedDayIndex,d
         }
         return;
       }
-      if (button.closest('[data-waybook-stop-id]')) {
-        window.history.pushState({waybookNav:true,day:currentDayRef.current,layer:'event'},'',window.location.href);
-        return;
-      }
       const label = (button.getAttribute('aria-label') || button.textContent || '').trim();
       if (!button.closest('[data-waybook-event-viewer]')) return;
-      if (/放大照片|查看回憶照片|查看大圖|全螢幕方式播放/.test(label)) {
+      if (/全螢幕方式播放/.test(label)) {
         window.history.pushState({waybookNav:true,day:currentDayRef.current,layer:'media'},'',window.location.href);
       }
     };
@@ -59,7 +55,7 @@ export const DaySelector: React.FC<DaySelectorProps> = ({days,selectedDayIndex,d
       const hasViewer = Boolean(document.querySelector('[data-waybook-video-viewer], [data-waybook-memory-photo-viewer], [data-waybook-ref-photo-viewer]'));
       const hasEvent = Boolean(document.querySelector('[data-waybook-event-viewer]'));
       if (hasViewer || hasEvent) {
-        window.dispatchEvent(new Event('waybook:back'));
+        window.dispatchEvent(new CustomEvent('waybook:back',{detail:{layer:hasViewer?'media':'event'}}));
         setBackHint('');
         return;
       }
@@ -100,7 +96,7 @@ export const DaySelector: React.FC<DaySelectorProps> = ({days,selectedDayIndex,d
       if(media || event) {
         // Use the same popstate path as Android, keeping history in sync.
         if(state?.waybookNav && (state.layer==='media' || state.layer==='event') && window.history.length > 1) window.history.back();
-        else window.dispatchEvent(new Event('waybook:back'));
+        else window.dispatchEvent(new CustomEvent('waybook:back',{detail:{layer:media?'media':'event'}}));
       } else if(currentDayRef.current > 0) {
         if(state?.waybookNav && window.history.length > 1) window.history.back();
         else selectDayRef.current(currentDayRef.current-1);

@@ -19,7 +19,6 @@ import { TripHeader } from './components/TripHeader';
 import { DaySelector } from './components/DaySelector';
 import { ViewToggle, type ItineraryViewMode } from './components/ViewToggle';
 import { StopCard } from './components/StopCard';
-import { PostcardPageTurn, type PostcardMotionState } from './components/PostcardPageTurn';
 import { TransitConnector } from './components/TransitConnector';
 import { DayRouteView } from './components/DayRouteView';
 import { StopDetailSheet } from './components/StopDetailSheet';
@@ -66,37 +65,18 @@ export default function App() {
   const [dayDirection, setDayDirection] = useState(1);
   const [viewMode, setViewMode] = useState<ItineraryViewMode>('timeline');
   const [selectedStop, setSelectedStop] = useState<ItineraryStop | null>(null);
-  const [postcardMotion, setPostcardMotion] = useState<PostcardMotionState | null>(null);
-  const selectedSourceRef = React.useRef<PostcardMotionState | null>(null);
+  const selectedSourceRef = React.useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const selectedStopRef = React.useRef<ItineraryStop | null>(null);
   const openPostcard = (stop: ItineraryStop, rect: DOMRect) => {
-    if (selectedStopRef.current || postcardMotion) return;
-    const source = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
-    const context: PostcardMotionState = { stop, source, cover: photoGalleries[stop.id]?.[0], direction: 'open' };
-    selectedSourceRef.current = context;
-    setPostcardMotion(context);
+    if (selectedStopRef.current) return;
+    selectedSourceRef.current = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    window.history.pushState({waybookNav:true,day:selectedDayIndex,layer:'event'},'',window.location.href);
+    selectedStopRef.current = stop;
+    setSelectedStop(stop);
   };
-  const closePostcard = (skipReverse = false) => {
-    if (!selectedStopRef.current || postcardMotion) return;
-    const original = selectedSourceRef.current;
+  const closePostcard = () => {
     selectedStopRef.current = null;
     setSelectedStop(null);
-    if (!skipReverse && original && original.stop.id === selectedStop?.id && viewMode === 'timeline') {
-      // Re-measure in case the vertical list moved while the detail sheet was open.
-      const card = Array.from(document.querySelectorAll<HTMLElement>('[data-waybook-stop-id]'))
-        .find(node => node.dataset.waybookStopId === original.stop.id);
-      const rect = card?.getBoundingClientRect();
-      const source = rect ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height } : original.source;
-      setPostcardMotion({ ...original, source, direction: 'close' });
-    }
-  };
-  const finishPostcardMotion = () => {
-    if (!postcardMotion) return;
-    if (postcardMotion.direction === 'open') {
-      selectedStopRef.current = postcardMotion.stop;
-      setSelectedStop(postcardMotion.stop);
-    }
-    setPostcardMotion(null);
   };
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -492,7 +472,7 @@ export default function App() {
   const motionSuppressClickUntil = React.useRef(0);
   const motionDaySwipe = (deltaX: number, deltaY: number) => {
     if (Math.abs(deltaX) < 85 || Math.abs(deltaX) < Math.abs(deltaY)*1.6) return;
-    if (selectedStopRef.current || postcardMotion || isEditOpen || isShareOpen) return;
+    if (selectedStopRef.current || isEditOpen || isShareOpen) return;
     motionSuppressClickUntil.current=Date.now()+500;
     const next = selectedDayIndex + (deltaX < 0 ? 1 : -1);
     if (next < 0 || next >= itinerary.days.length) return;
@@ -645,12 +625,10 @@ export default function App() {
           }}
           onMemorySound={(kind: UiSoundKind) => { void playUiSound(kind, soundEnabled); }}
           readOnly={!isAdmin}
+          sourceRect={selectedSourceRef.current}
           onClose={closePostcard}
         />
 
-        {postcardMotion && (
-          <PostcardPageTurn motionState={postcardMotion} onComplete={finishPostcardMotion} />
-        )}
 
         <ShareImportSheet
           isOpen={isShareOpen}

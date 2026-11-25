@@ -1,4 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
+import {PhotoSwipeStage} from './PhotoSwipeStage';
 import {Camera, Star, Trash2, Images, Loader2, ImageIcon, ChevronLeft, ChevronRight, Expand} from 'lucide-react';
 import {compressImageToDataUrl} from '../utils/customPhotos';
 import type { UiSoundKind } from '../utils/uiSounds';
@@ -33,15 +35,41 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
   const [error,setError]=useState('');
   const [selected,setSelected]=useState<number|null>(null);
   const [active,setActive]=useState(0);
+  const viewerOpenRef=useRef(false);
+  const backPendingRef=useRef(false);
 
   useEffect(()=>{
     if(active>Math.max(photos.length-1,0)) setActive(Math.max(photos.length-1,0));
   },[photos.length,active]);
 
-  const dismissSelected = () => {
-    if (window.history.state?.waybookNav && window.history.state.layer==='media' && window.history.length>1) window.history.back();
-    else setSelected(null);
+  const openSelected = (index:number) => {
+    if(viewerOpenRef.current||!photos[index]?.src)return;
+    window.history.pushState({...window.history.state,waybookNav:true,layer:'media'},'',window.location.href);
+    viewerOpenRef.current=true;backPendingRef.current=false;
+    onSound?.('whoosh');setSelected(index);setActive(index);
   };
+  const closeSelected = () => {viewerOpenRef.current=false;backPendingRef.current=false;setSelected(null);};
+  const dismissSelected = () => {
+    if(!viewerOpenRef.current||backPendingRef.current)return;
+    if(window.history.state?.waybookNav && window.history.state.layer==='media'){
+      backPendingRef.current=true;window.history.back();
+    }else closeSelected();
+  };
+  const changeSelected = (index:number) => {
+    if(index<0||index>=photos.length||index===selected)return;
+    onSound?.('slide');setSelected(index);setActive(index);
+  };
+  useEffect(()=>{
+    if(selected===null)return;
+    const back=()=>closeSelected();
+    const key=(e:KeyboardEvent)=>{
+      if(e.key==='Escape'){e.preventDefault();dismissSelected();}
+      if(e.key==='ArrowLeft')changeSelected(selected-1);
+      if(e.key==='ArrowRight')changeSelected(selected+1);
+    };
+    window.addEventListener('waybook:back',back);window.addEventListener('keydown',key);
+    return()=>{window.removeEventListener('waybook:back',back);window.removeEventListener('keydown',key);};
+  },[selected,photos.length]);
 
   const activePhoto = photos[active] || null;
 
@@ -198,7 +226,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
                 type="button"
                 key={`${stopId}-${photo.id||'local'}-${index}`}
                 data-card-index={index}
-                onClick={()=>{onSound?.('whoosh');setSelected(index);}}
+                onClick={()=>{if(!draggedRef.current)openSelected(index);}}
                 aria-label={`查看回憶照片 ${index+1}`}
                 className={`group relative snap-center shrink-0 transition-all duration-300 ease-out focus:outline-none ${rotation} ${isActive ? 'z-20 scale-[1.05] -translate-y-3 rotate-0' : 'z-10 opacity-90 hover:opacity-100'}`}
                 style={{width:`${CARD_WIDTH}px`, marginLeft:i===0?0:`${CARD_GAP}px`}}
@@ -255,7 +283,7 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
           <div className="flex flex-wrap gap-2">
             <button disabled={busy||active===0} type="button" className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium ring-1 ring-black/10 disabled:opacity-30" onClick={()=>{onSound?.('tap');void change([activePhoto,...photos.filter((_,j)=>j!==active)]);}}><Star className="w-3.5 h-3.5"/>設為回憶封面</button>
             <button disabled={busy} type="button" className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium text-red-700 ring-1 ring-red-200 disabled:opacity-30" onClick={()=>{onSound?.('tap'); if(window.confirm('確定刪除這張回憶照片？')) void change(photos.filter((_,j)=>j!==active)); }}><Trash2 className="w-3.5 h-3.5"/>刪除這張</button>
-            <button type="button" onClick={()=>{onSound?.('whoosh');setSelected(active);}} className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium ring-1 ring-black/10"><Expand className="w-3.5 h-3.5"/>查看大圖</button>
+            <button type="button" onClick={()=>openSelected(active)} className="inline-flex items-center gap-1 rounded-full bg-white px-3 py-2 text-xs font-medium ring-1 ring-black/10"><Expand className="w-3.5 h-3.5"/>查看大圖</button>
           </div>
         </>}
       </div>}
@@ -267,15 +295,15 @@ export function MemoryGallery({stopId,photos,onSave,readOnly,onSound}:Props) {
     </>}
     {error&&<p role="alert" className="text-red-700 text-xs">{error}</p>}
 
-    {selected!==null && photos[selected]?.src && <div role="dialog" aria-modal="true" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={()=>{onSound?.('tap');dismissSelected();}}>
-      <button aria-label="關閉回憶照片" className="absolute top-5 right-5 text-white p-2 bg-white/20 rounded-full" onClick={e=>{e.stopPropagation();onSound?.('tap');dismissSelected();}}>✕</button>
-      <img className="max-w-full max-h-[75vh] object-contain" src={photos[selected].src} alt={photos[selected].caption||'旅途回憶'}/>
+    {selected!==null && photos[selected] && createPortal(<div data-waybook-memory-photo-viewer role="dialog" aria-modal="true" aria-label="回憶照片" className="fixed inset-0 z-[80] bg-black/95 flex flex-col justify-center items-center p-4" onClick={e=>{e.stopPropagation();onSound?.('tap');dismissSelected();}}>
+      <button aria-label="關閉回憶照片" className="absolute z-10 top-5 right-5 text-white p-2 bg-white/20 rounded-full" onClick={e=>{e.stopPropagation();onSound?.('tap');dismissSelected();}}>✕</button>
+      <PhotoSwipeStage images={photos.map((p,i)=>({src:p.src,alt:p.caption||`旅途回憶 ${i+1}`}))} index={selected} onChange={changeSelected}/>
       <p className="text-white text-sm mt-4 text-center max-w-xl">{photos[selected].caption || '旅途回憶'}</p>
       <div className="flex items-center gap-4 mt-3 text-white">
-        <button disabled={selected===0} className="disabled:opacity-30" onClick={e=>{e.stopPropagation();onSound?.('slide');setSelected(Math.max(0,selected-1));setActive(Math.max(0,selected-1));}}>上一張</button>
+        <button disabled={selected===0} className="disabled:opacity-30" onClick={e=>{e.stopPropagation();changeSelected(selected-1);}}>上一張</button>
         <span>{selected+1}/{photos.length}</span>
-        <button disabled={selected===photos.length-1} className="disabled:opacity-30" onClick={e=>{e.stopPropagation();onSound?.('slide');setSelected(Math.min(photos.length-1,selected+1));setActive(Math.min(photos.length-1,selected+1));}}>下一張</button>
+        <button disabled={selected===photos.length-1} className="disabled:opacity-30" onClick={e=>{e.stopPropagation();changeSelected(selected+1);}}>下一張</button>
       </div>
-    </div>}
+    </div>,document.body)}
   </section>;
 }
