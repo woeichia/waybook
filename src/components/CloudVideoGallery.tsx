@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud, Maximize2, Minimize2, RotateCw, RotateCcw, Pause, Volume2, VolumeX } from 'lucide-react';
+import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud, Trash2, Maximize2, Minimize2, RotateCw, RotateCcw, Pause, Volume2, VolumeX } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
-import { cloudRead } from '../utils/driveCloud';
+import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../utils/driveCloud';
 import { getCachedVideo, putCachedVideo } from '../utils/videoCache';
 import { downloadForCache } from '../utils/downloadForCache';
+import { removeCachedWaybookVideo } from '../utils/removeCachedWaybookVideo';
 
 /** Cloud video references only. Google Drive handles streaming and access permissions. */
 type VideoRef = { id: string; size: number; mimeType: string; posterId?: string; width?: number; height?: number };
@@ -37,6 +38,8 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
   const [playError,setPlayError] = useState('');
   const [videoUrl,setVideoUrl] = useState('');
   const [sourceLabel,setSourceLabel] = useState('');
+  const [deleteBusy,setDeleteBusy] = useState(false);
+  const [deleteError,setDeleteError] = useState('');
   // A Waybook-owned viewer avoids triggering the phone's native fullscreen rotation.
   const inlineRef=useRef<HTMLVideoElement>(null);
   const expandedRef=useRef<HTMLVideoElement>(null);
@@ -200,6 +203,33 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     return()=>window.removeEventListener('keydown',onKey);
   },[viewerOpen,expanded]);
 
+  const deletePublishedVideo=async()=>{
+    if(readOnly || !video || !available || deleteBusy) return;
+    const oldId=video.id;
+    if(!window.confirm('確定刪除這個活動的影片及其專屬封面？\n\n將從 Waybook 移除，並把沒有被其他活動使用的 Drive 檔案移至垃圾桶。'))return;
+    setDeleteBusy(true);setDeleteError('');
+    try {
+      // Server rechecks this exact file ID: a newer video must never be removed accidentally.
+      const adminToken=await getGoogleIdToken(GOOGLE_CLIENT_ID);
+      const result=await cloudWrite<{updatedAt:string;cleanup?:{trashed:number;failed:number;skipped:number}}>(
+        'removeVideo',{stopId,expectedFileId:oldId},adminToken);
+      stopPlayback();
+      // If the network response succeeded, the published registry has already been updated.
+      const latest=await cloudRead<VideoIndex>({action:'videos'},20000).catch(()=>null);
+      if(latest && latest.videos && latest.videos[stopId]?.id===oldId)throw Error('伺服器仍顯示原影片，請重新整理後確認');
+      const next=latest && latest.videos ? latest :
+        {updatedAt:result.updatedAt,videos:Object.fromEntries(Object.entries(index?.videos||{}).filter(([k])=>k!==stopId))};
+      setIndex(next);writeIndex(next);
+      // Local bytes are no longer needed on this device; failures don't affect Drive deletion.
+      void removeCachedWaybookVideo(oldId).catch(()=>{});
+      window.dispatchEvent(new CustomEvent('waybook:videoPublished',{detail:{stopId}}));
+      if(result.cleanup?.failed) window.alert('影片已從 Waybook 移除，但部分 Drive 檔案清理未成功。請檢查 Apps Script 執行記錄及 Google Drive 垃圾桶。');
+      else window.alert('影片已從 Waybook 移除。未被其他活動使用的影片與封面已移至 Google Drive 垃圾桶。');
+    } catch(error) {
+      setDeleteError(error instanceof Error?error.message:'刪除影片失敗，請重新整理並確認狀態');
+    } finally {setDeleteBusy(false);}
+  };
+
   if (!available) return null;
   return <section className="mt-4 rounded-2xl bg-[#F0F2F7] p-3 ring-1 ring-[#1F3FB0]/15 space-y-3" aria-label="Google Drive 雲端回憶短片">
     <div className="flex items-center gap-2 font-semibold text-[#203A7C] text-sm"><Cloud size={17}/>雲端回憶短片</div>
@@ -237,6 +267,14 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
         {sourceLabel&&<p className="text-center text-[11px] text-[#5B6070]">{sourceLabel}</p>}
       </div>
     )}
+    {!readOnly && <div className="space-y-2">
+      <button type="button" disabled={deleteBusy} onClick={()=>void deletePublishedVideo()}
+        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-semibold text-red-700 disabled:opacity-50">
+        {deleteBusy?<Loader2 size={16} className="animate-spin"/>:<Trash2 size={16}/>}
+        {deleteBusy?'正在刪除…':'刪除影片及未使用的 Drive 檔案'}
+      </button>
+      {deleteError&&<p role="alert" className="text-xs text-red-700">{deleteError}</p>}
+    </div>}
     <a href={driveUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[#1F3FB0] text-xs underline"><ExternalLink size={14}/>若內嵌播放失敗，請在 Google Drive 中開啟</a>
     {expanded && videoUrl && createPortal(
       <div data-waybook-video-viewer role="dialog" aria-modal="true" aria-label="回憶短片放大播放"
