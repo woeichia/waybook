@@ -81,3 +81,38 @@ export function travelSummary(day:ItineraryDay) {
  const fmt=(m:number)=>m>=60?`${Math.floor(m/60)} 小時${m%60?` ${m%60} 分鐘`:''}`:`${m} 分鐘`;
  return `預計交通時間：約 ${fmt(t.min)}${t.min!==t.max?` – ${fmt(t.max)}`:''}`;
 }
+
+
+// Planning buffers use explicit schedule information only, never guessed visit durations.
+function exactClock(text:string):number|null {
+ const m=/^(\d{1,2}):(\d{2})$/.exec(text.trim());
+ if(!m)return null;
+ const h=Number(m[1]),min=Number(m[2]);return h<24&&min<60?h*60+min:null;
+}
+function timeWindow(stop:ItineraryStop):{start:number;end:number|null}|null {
+ const parts=stop.time.trim().split(/\s*[-–—~～－至]\s*/);
+ if(parts.length>2)return null;
+ const start=exactClock(parts[0]);if(start===null)return null;
+ if(parts.length===2){const end=exactClock(parts[1]);return {start,end:end!==null&&end>=start?end:null};}
+ const duration=stop.schedule?.durationMinutes;
+ if(typeof duration==='number'&&Number.isFinite(duration)&&duration>=0&&start+duration<1440)return {start,end:start+duration};
+ // An explicitly labelled departure is an instant, not a visit of unknown length.
+ return {start,end:stop.category==='Transport'&&/(出發|啟程|departure|depart)/i.test(stop.title)?start:null};
+}
+export function travelBuffer(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop):number|null {
+ const from=timeWindow(a),to=timeWindow(b),minutes=routeMinutes(day,a,b);
+ if(!from||from.end===null||!to||minutes==null||!Number.isFinite(minutes)||minutes<0)return null;
+ // Earlier clock times can be an overnight journey or invalid ordering; do not guess.
+ if(to.start<from.start)return null;
+ return Math.round(to.start-from.end-minutes);
+}
+export function bufferSummary(day:ItineraryDay,pairs:[ItineraryStop,ItineraryStop][]):{text:string;warning:boolean}|null {
+ if(!pairs.length)return null;
+ const values=pairs.map(([a,b])=>travelBuffer(day,a,b));
+ if(values.some(v=>v===null))return null;
+ const min=Math.min(...values as number[]),max=Math.max(...values as number[]);
+ if(min===max)return {text:min<0?`時間不足 ${-min} 分鐘`:`緩衝 ${min} 分鐘`,warning:min<0};
+ if(max<0)return {text:`時間不足 ${-max}–${-min} 分鐘`,warning:true};
+ if(min<0)return {text:`不足 ${-min} 至緩衝 ${max} 分鐘`,warning:true};
+ return {text:`緩衝 ${min}–${max} 分鐘`,warning:false};
+}

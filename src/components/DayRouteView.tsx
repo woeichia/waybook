@@ -1,4 +1,4 @@
-import { routeLabel, travelSummary } from '../utils/branchRoutes';
+import { routeLabel, travelSummary, bufferSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -43,6 +43,10 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
         <ol className="mt-4 space-y-0">
           {day.stops.map((stop, idx) => {
             const isLast = idx === day.stops.length - 1;
+            const next=day.stops[idx+1];
+            const buffer=next?bufferSummary(day,[[stop,next]]):null;
+            const structured=next?routeLabel(day,stop,next):'';
+            const notes=next?(day.travelRoutes?.find(r=>r.fromEventId===stop.id&&r.toEventId===next.id)?.notes?.trim()|| (structured?stop.transitToNext.trim():'')):'';
             return (
               <li key={stop.id} className="relative flex gap-3.5">
                 <div className="flex flex-col items-center">
@@ -88,9 +92,11 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
 
                   {!isLast && (
                     <div className="mt-2.5 inline-flex items-center rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[11px] font-medium text-[#5E5A52]">
-                      {routeLabel(day,stop,day.stops[idx+1]) || stop.transitToNext.trim() || '前往下一站'}
+                      {structured || stop.transitToNext.trim() || '前往下一站'}
                     </div>
                   )}
+                  {notes&&notes!==structured&&<p className="mt-1 text-[11px] text-[#5E5A52] leading-relaxed">{notes}</p>}
+                  {buffer&&<div><span className={`mt-1 inline-block rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[11px] ${buffer.warning?'text-red-700':'text-[#5E5A52]'}`}>{buffer.text}</span></div>}
                 </motion.div>
               </li>
             );
