@@ -1,3 +1,4 @@
+import { cleanDay, edges, modes } from '../utils/branchRoutes';
 import React, { useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Camera, Check, CopyPlus, Plus, Trash2, X } from 'lucide-react';
 import type { ItineraryData, ItineraryDay, ItineraryStop } from '../types/itinerary';
@@ -42,9 +43,9 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
   const [routeChecked, setRouteChecked] = useState(false);
   if (!day) return null;
   const updateDay = (patch: Partial<ItineraryDay>) => {
-    onChange({ ...data, days: data.days.map((d, i) => i === dayIndex ? { ...d, ...patch } : d) });
+    onChange({ ...data, days: data.days.map((d, i) => i === dayIndex ? cleanDay({ ...d, ...patch }) : d) });
   };
-  const updateStop = (id: string, patch: Partial<ItineraryStop>) => updateDay({ stops: day.stops.map(s => s.id === id ? { ...s, ...patch } : s) });
+  const updateStop = (id: string, patch: Partial<ItineraryStop>) => updateDay({ stops: day.stops.map(s => s.id === id ? { ...s, ...patch } : s), ...((patch.mapQuery!==undefined||patch.locationName!==undefined)?{travelRoutes:day.travelRoutes?.filter(r=>r.fromEventId!==id&&r.toEventId!==id)}:{}) });
   const addStop = () => {
     const id = `stop-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     updateDay({ stops: [...day.stops, { id, time: '10:00 AM', title: '新景點', category: 'Sightseeing', description: '', image: '', locationName: '', mapQuery: '', transitToNext: '' }] });
@@ -53,11 +54,13 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
   const moveStop = (index: number, direction: number) => {
     const dest = index + direction;
     if (dest < 0 || dest >= day.stops.length) return;
+    if(day.optionalGroups?.length){setStatus("請先解除備選組合再調整順序。");return;}
     const stops = [...day.stops];
     [stops[index], stops[dest]] = [stops[dest], stops[index]];
     updateDay({ stops });
   };
   const openTransfer = (id: string, mode: 'move' | 'copy') => {
+    if(day.optionalGroups?.length){setStatus('請先解除備選組合再移動或複製活動。');return;}
     const nextDay = dayIndex === data.days.length - 1 ? 0 : dayIndex + 1;
     setTransfer({ id, mode });
     setDestinationDay(nextDay);
@@ -93,7 +96,7 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
   };
   const resetRouteEstimate = () => { setRouteEstimate(null); setRouteChecked(false); setRouteError(''); setTravelEdits({}); };
   const transferEvent = () => {
-    if (!transfer || !movingStop || destinationDay === dayIndex || !targetDay || !plan) return;
+    if (!transfer || !movingStop || destinationDay === dayIndex || !targetDay || !plan || targetDay.optionalGroups?.length) return;
     if (!routeChecked && !window.confirm('尚未取得道路交通時間，30 分鐘只是佔位估算。請先按「計算實際道路時間」或手動核實每段交通。仍然繼續？')) return;
     if (routeEstimate?.legs.some(leg => leg.minutes == null || leg.error) && !window.confirm('部分路段無法取得有效道路路線，行程不能視為已驗證。仍要自行承擔並繼續？')) return;
     if (plan.issues.length && !window.confirm(`行程存在 ${plan.issues.length} 項時間衝突，仍要依預覽時間套用嗎？\n\n${plan.issues.join('\n')}`)) return;
@@ -102,8 +105,8 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
     const eventId = isCopy ? `stop-${crypto.randomUUID()}` : movingStop.id;
     const plannedStops = applyPlanTimes(plan,plannerInputs).map(stop => stop.id === '__waybook_preview_copy__' ? {...stop,id:eventId} : stop);
     const days = data.days.map((item,index) => {
-      if (index === dayIndex && !isCopy) return {...item,stops:item.stops.filter(stop=>stop.id!==movingStop.id)};
-      if (index === destinationDay) return {...item,stops:plannedStops};
+      if (index === dayIndex && !isCopy) return cleanDay({...item,stops:item.stops.filter(stop=>stop.id!==movingStop.id)});
+      if (index === destinationDay) return cleanDay({...item,stops:plannedStops});
       return item;
     });
     if (isCopy) onCopyEventPhotos?.(movingStop.id,eventId);
@@ -150,20 +153,22 @@ export function ItineraryEditor({ data, dayIndex, onChange, onPhoto, onCopyEvent
         <Field label="位置文字" value={stop.locationName} onChange={v => updateStop(stop.id, { locationName: v })}/>
         <Field label="Google Maps 搜尋名稱 / 地址" value={stop.mapQuery} onChange={v => updateStop(stop.id, { mapQuery: v })}/>
         <Field label="前往下一站交通說明" value={stop.transitToNext} onChange={v => updateStop(stop.id, { transitToNext: v })}/>
+        {(() => {const group=day.optionalGroups?.find(g=>g.eventIds.includes(stop.id));return group?<button type="button" className="text-xs text-[#1F3FB0]" onClick={()=>updateDay({optionalGroups:day.optionalGroups?.filter(g=>g!==group)})}>解除備選組合（保留兩個活動）</button>:<button type="button" disabled={!!day.optionalGroups?.some(g=>g.eventIds.includes(day.stops[index-1]?.id)||g.eventIds.includes(day.stops[index+1]?.id))} className="rounded-xl bg-[#E8ECFA] px-3 py-2 text-xs text-[#1F3FB0] disabled:opacity-40" onClick={()=>{const id=`stop-${crypto.randomUUID()}`;const stops=[...day.stops];stops.splice(index+1,0,{id,time:stop.time,title:'新備選景點',category:stop.category,description:'',image:'',locationName:'',mapQuery:'',transitToNext:''});updateDay({stops,optionalGroups:[...(day.optionalGroups??[]),{eventIds:[stop.id,id],selectedEventId:null}]});setExpanded(id);}}>新增備選行程</button>})()}
         <Field label="圖片網址 (可貼入 HTTPS 連結)" value={stop.image} onChange={v => updateStop(stop.id, { image: v })}/>
         <div className="flex flex-wrap gap-2"><button type="button" onClick={() => {setPhotoStop(stop.id);photoRef.current?.click();}} className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0] flex items-center gap-1"><Camera size={15}/>上傳本機照片</button>
-        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#EEEDE8] flex items-center gap-1" onClick={() => {const id = `stop-${crypto.randomUUID()}`;const stops = [...day.stops];stops.splice(index + 1,0,{...stop,id});onCopyEventPhotos?.(stop.id,id);updateDay({stops});setExpanded(id);}}><CopyPlus size={15}/>複製到本日</button>
+        <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#EEEDE8] flex items-center gap-1" disabled={!!day.optionalGroups?.length} onClick={() => {const id = `stop-${crypto.randomUUID()}`;const stops = [...day.stops];stops.splice(index + 1,0,{...stop,id});onCopyEventPhotos?.(stop.id,id);updateDay({stops});setExpanded(id);}}><CopyPlus size={15}/>複製到本日</button>
         <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0]" onClick={() => openTransfer(stop.id,'move')}>移動到另一天</button>
         <button type="button" className="rounded-xl px-3 py-2 text-xs bg-[#E8ECFA] text-[#1F3FB0]" onClick={() => openTransfer(stop.id,'copy')}>複製到另一天</button>
         <button type="button" className="rounded-xl px-3 py-2 text-xs bg-red-50 text-red-700 flex items-center gap-1" onClick={() => {if(window.confirm(photoEventIds.includes(stop.id) ? `「${stop.title}」已有照片。刪除活動會令照片與行程失去連結。建議先匯出完整備份，確定仍要刪除？` : `確定刪除「${stop.title}」？`)){updateDay({stops:day.stops.filter(s=>s.id!==stop.id)});setExpanded(null);}}}><Trash2 size={15}/>刪除</button></div>
       </div>}
     </div>)}</div>
+    <div className="mt-4 space-y-2"><p className="text-sm font-semibold">預計交通時間</p>{edges(day).map(edge=>{const a=day.stops.find(s=>s.id===edge.fromEventId)!,b=day.stops.find(s=>s.id===edge.toEventId)!;const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);const save=(minutes:number|null,mode?:string)=>updateDay({travelRoutes:[...(day.travelRoutes??[]).filter(x=>x.fromEventId!==a.id||x.toEventId!==b.id),...(minutes===null?[]:[{...edge,durationMinutes:minutes,transportMode:mode,notes:r?.notes}])]});return <div key={a.id+b.id} className="rounded-xl bg-white p-2"><p className="text-xs">{a.title} → {b.title}</p><div className="grid grid-cols-2 gap-2"><input aria-label="預計分鐘" type="number" min={0} max={1440} placeholder="分鐘" className={inputClass} value={r?.durationMinutes??''} onChange={e=>{const v=e.target.value; if(v==='')save(null);else if(Number(v)>=0&&Number(v)<=1440)save(Math.round(Number(v)),r?.transportMode);}}/><select aria-label="交通方式" className={inputClass} disabled={!r} value={r?.transportMode??''} onChange={e=>{if(r)save(r.durationMinutes,e.target.value||undefined);}}><option value="">交通方式</option>{Object.entries(modes).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></div></div>})}</div>
     {transfer && targetDay && movingStop && plan && <div className="mt-4 rounded-2xl bg-white p-3 ring-1 ring-[#1F3FB0]/25 space-y-3" role="group" aria-label="智能行程排程預覽">
       <p className="text-sm font-semibold">{transfer.mode === 'move' ? '移動活動' : '複製活動'} · 智能時間預覽</p>
       <p className="text-xs text-[#68635C]">此版本不呼叫地圖路線 API。交通時間及未知活動時長是估計值，須由你自行核實；不會自動刪除活動或修改來源日的其他行程。</p>
       <label className="text-xs block">目標日期
         <select className={`${inputClass} mt-1`} value={destinationDay} onChange={e => {const i=Number(e.target.value);setDestinationDay(i);setInsertAt(data.days[i]?.stops.length??0);setPlannerEnd(data.days[i]?.title.includes('包車')?'19:00':'21:00');setTravelEdits({});setDurationEdits({});setFixedEdits({});resetRouteEstimate();}}>
-          {data.days.map((d,i)=><option key={`${d.date}-${i}`} value={i} disabled={i===dayIndex}>{d.date} · {d.title}</option>)}
+          {data.days.map((d,i)=><option key={`${d.date}-${i}`} value={i} disabled={i===dayIndex||!!d.optionalGroups?.length}>{d.date} · {d.title}</option>)}
         </select>
       </label>
       <label className="text-xs block">插入活動位置

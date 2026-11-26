@@ -161,6 +161,20 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
     try { previewJsonImport(jsonInput); }
     catch (error) { setJsonError(error instanceof Error ? error.message : 'JSON 格式不正確。'); }
   };
+  const previewTravelOnly = () => {
+    if(readOnly)return;
+    setImportPreview(null);setJsonError(null);
+    try {
+      const raw=JSON.parse(jsonInput);const validated=validateItineraryData(raw);
+      if(!validated.ok)throw new Error(validated.error);
+      const incoming=validated.data;
+      if(!raw.days.every((d: any)=>Array.isArray(d.travelRoutes)))throw new Error("每一天必須包含 travelRoutes 陣列。");
+      const identity=(d:ItineraryData['days'][number])=>JSON.stringify([d.date,d.stops.map(s=>s.id), (d.optionalGroups??[]).map(g=>g.eventIds)]);
+      if(incoming.days.length!==currentTrip.days.length||currentTrip.days.some((d,i)=>identity(d)!==identity(incoming.days[i])))throw new Error('活動 ID、順序或備選組合不一致，已停止更新。');
+      const days=currentTrip.days.map((d,i)=>({...d,travelRoutes:incoming.days[i].travelRoutes??[]}));
+      setImportPreview({data:{...currentTrip,days},summary:`僅更新 ${days.reduce((n,d)=>n+(d.travelRoutes?.length??0),0)} 段交通資訊；活動、選擇及照片影片保持不變。`});
+    }catch(e){setJsonError(e instanceof Error?e.message:'JSON 格式不正確');}
+  };
   const confirmImport = () => {
     if (!importPreview) return;
     onApplyItinerary(importPreview.data, importPreview.refs, importPreview.memories);
@@ -458,6 +472,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
               >
                 Import & Apply JSON
               </button>
+              <button type="button" onClick={previewTravelOnly} className="w-full rounded-xl bg-[#E8ECFA] text-[#1F3FB0] p-3 text-sm font-semibold">僅更新交通資訊</button>
             </div>
           )}
 

@@ -1,3 +1,4 @@
+import { parseBranchData } from './branchRoutes';
 import type { ItineraryData, ItineraryDay, ItineraryStop } from '../types/itinerary';
 
 const STORAGE_KEY = 'waybook_active_itinerary_pdf_2026_v3';
@@ -114,6 +115,8 @@ export function validateItineraryData(raw: unknown): { ok: true; data: Itinerary
       title: typeof d.title === 'string' && d.title.trim() ? d.title.trim() : `Day ${i + 1}`,
       stops,
     });
+    const branchError = parseBranchData(normalizedDays[normalizedDays.length-1], d);
+    if (branchError) return {ok:false,error:`Day ${i+1}: ${branchError}`};
   }
 
   return {

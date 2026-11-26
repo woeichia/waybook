@@ -1,3 +1,4 @@
+import { routeLabel } from '../utils/branchRoutes';
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -86,7 +87,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
 
                   {!isLast && (
                     <div className="mt-2.5 inline-flex items-center rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[11px] font-medium text-[#5E5A52]">
-                      {stop.transitToNext.trim() || '前往下一站'}
+                      {routeLabel(day,stop,day.stops[idx+1]) || stop.transitToNext.trim() || '前往下一站'}
                     </div>
                   )}
                 </motion.div>

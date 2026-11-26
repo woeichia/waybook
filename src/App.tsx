@@ -1,3 +1,4 @@
+import { BranchTimeline } from './components/BranchTimeline';
 import React, { useEffect, useState } from 'react';
 import { WifiOff, Pencil } from 'lucide-react';
 import { playUiSound, readSoundEnabled, storeSoundEnabled, type UiSoundKind } from './utils/uiSounds';
@@ -579,21 +580,7 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <div>
-                        {activeDay.stops.map((stop, idx) => {
-                          const hasNext = idx < activeDay.stops.length - 1;
-                          return (
-                            <React.Fragment key={stop.id}>
-                              <StopCard
-                                stop={stop}
-                                customPhotoUrl={photoGalleries[stop.id]?.[0] ?? ''}
-                                onSelect={openPostcard}
-                              />
-                              {hasNext && <TransitConnector transitText={stop.transitToNext} />}
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
+                      <BranchTimeline day={activeDay} photos={photoGalleries} onSelect={openPostcard} onChoose={isAdmin?(ids,id)=>{unpublishedEditsRef.current=true;setItinerary(current=>({...current,days:current.days.map((day,i)=>i===selectedDayIndex?{...day,optionalGroups:day.optionalGroups?.map(g=>g.eventIds[0]===ids[0]?{...g,selectedEventId:id}:g)}:day)}));}:undefined}/>
                     )}
                   </motion.div>
                 )}
@@ -606,7 +593,7 @@ export default function App() {
                     exit={{ opacity: 0, x: dayDirection * -26, rotateY: dayDirection * 24, scale: 0.97 }}
                     transition={{ duration: 0.33, ease: TACTILE_EASE }}
                   >
-                    <DayRouteView day={activeDay} />
+                    {activeDay.optionalGroups?.length ? <BranchTimeline day={activeDay} route/> : <DayRouteView day={activeDay} />}
                   </motion.div>
                 )}
               </AnimatePresence>

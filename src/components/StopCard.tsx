@@ -7,11 +7,12 @@ import { SmartImage } from './SmartImage';
 
 interface StopCardProps {
   stop: ItineraryStop;
+  compact?: boolean;
   customPhotoUrl?: string;
   onSelect: (stop: ItineraryStop, rect: DOMRect) => void;
 }
 
-export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSelect }) => {
+export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSelect, compact=false }) => {
   const cardRef = React.useRef<HTMLElement>(null);
   const openPostcard = () => {
     const rect = cardRef.current?.getBoundingClientRect();
@@ -24,12 +25,12 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
       tabIndex={0} role="group" aria-label={`活動：${stop.title}，按 Enter 開啟詳情`}
       onClick={e=>{if(!(e.target as HTMLElement).closest('button,a'))openPostcard();}}
       onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openPostcard();}}}>
-      <div className="flex items-stretch gap-3.5">
+      <div className={compact?"flex flex-col gap-2":"flex items-stretch gap-3.5"}>
         <button
           type="button"
           onClick={openPostcard}
           aria-label={`查看 ${stop.title} 詳細資訊`}
-          className="relative w-[92px] h-[112px] rounded-2xl overflow-hidden shrink-0 bg-[#E6E3DC] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]"
+          className={`relative ${compact?"w-full h-[95px]":"w-[92px] h-[112px]"} rounded-2xl overflow-hidden shrink-0 bg-[#E6E3DC] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0]`}
         >
           <SmartImage
             src={stop.image}
@@ -43,7 +44,7 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
 
         <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
           <div>
-            <div className="flex items-center justify-between gap-2">
+            <div className={`flex items-center justify-between gap-2 ${compact?"flex-wrap":""}`}>
               <span className="font-mono text-[11px] font-medium text-[#5E5A52] tabular-nums whitespace-nowrap">
                 {stop.time}
               </span>
@@ -55,7 +56,7 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
               onClick={openPostcard}
               className="mt-1.5 block w-full text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1F3FB0] rounded-md"
             >
-              <h3 className="text-[16px] font-semibold text-[#1A1A1A] leading-snug truncate">
+              <h3 className={`text-[16px] font-semibold text-[#1A1A1A] leading-snug ${compact?"break-words":"truncate"}`}>
                 {stop.title}
               </h3>
               {stop.description && (
@@ -66,7 +67,7 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
             </button>
           </div>
 
-          <div className="mt-2.5 flex items-center justify-between gap-2">
+          <div className={`mt-2.5 flex items-center justify-between gap-2 ${compact?"flex-wrap":""}`}>
             <span className="inline-flex items-center gap-1 text-[11px] text-[#5E5A52] min-w-0">
               <MapPin className="w-3 h-3 shrink-0 text-[#1F3FB0]" />
               <span className="truncate">{stop.locationName}</span>

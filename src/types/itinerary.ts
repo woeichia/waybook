@@ -16,7 +16,12 @@ export interface ItineraryStop {
   schedule?: { durationMinutes?: number; travelFromPreviousMinutes?: number; fixedStart?: boolean };
 }
 
+export interface OptionalEventGroup { eventIds: [string, string]; selectedEventId?: string | null }
+export interface TravelRoute { fromEventId: string; toEventId: string; durationMinutes: number; transportMode?: string; notes?: string }
+
 export interface ItineraryDay {
+  optionalGroups?: OptionalEventGroup[];
+  travelRoutes?: TravelRoute[];
   dayNumber: number;
   date: string;
   title: string;
