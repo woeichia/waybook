@@ -1,42 +1,67 @@
-import React, { useId } from 'react';
+import React, { useId, useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
-import { slots, inactive, routeLabel } from '../utils/branchRoutes';
+import { slots, inactive, routeLabel, routeMinutes, previewDay, travelSummary, type RoutePreview } from '../utils/branchRoutes';
 import { StopCard } from './StopCard';
 import { TransitConnector } from './TransitConnector';
 import { CategoryBadge } from './CategoryBadge';
 import { buildStopMapsUrl, buildFullDayMapsUrl } from '../utils/itinerary';
-interface Props {day:ItineraryDay; photos?:Record<string,string[]>; onSelect?:(stop:ItineraryStop,rect:DOMRect)=>void; onChoose?:(ids:[string,string],id:string|null)=>void; route?:boolean}
-export function BranchTimeline({day,photos,onSelect,onChoose,route=false}:Props) {
- const rows=slots(day), reduced=useReducedMotion(), gradientId=useId().replace(/:/g,'');
- const animated=route&&!reduced;
- const anim=(delay:number)=>({initial:animated?{opacity:0,y:5}:false,animate:{opacity:1,y:0},transition:{duration:animated?.28:0,delay:animated?delay:0}});
- const step=0.8;
- const edgeText=(a:ItineraryStop,b:ItineraryStop,linear:boolean)=>routeLabel(day,a,b)||(linear?a.transitToNext?.trim():'')||'';
+interface Props {day:ItineraryDay; photos?:Record<string,string[]>; onSelect?:(stop:ItineraryStop,rect:DOMRect)=>void; preview:RoutePreview; onPreview:(ids:[string,string],id:string|null)=>void; onConfirm?:(ids:[string,string],id:string|null)=>void; route?:boolean}
+export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,route=false}:Props) {
+ const effective=previewDay(day,preview), rows=slots(day), reduced=useReducedMotion(), uid=useId().replace(/:/g,'');
+ const animated=route&&!reduced, step=.85;
+ const root=useRef<HTMLDivElement>(null), [width,setWidth]=useState(0);
+ useLayoutEffect(()=>{const el=root.current;if(!el)return;const measure=()=>setWidth(el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect();},[]);
+ const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
+ const label=(a:ItineraryStop,b:ItineraryStop)=>routeLabel(day,a,b)||((!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id)))?a.transitToNext?.trim():'')||'';
+ const center=(count:number,index:number)=>count===1?(route?14:width/2):index===0?(width-8)/4:(3*width+8)/4;
+ function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
+  if(row.length===1&&next.length===1&&!route)return <TransitConnector transitText={label(row[0],next[0])}/>;
+  const linear=row.length===1&&next.length===1, junction=width/2;
+  const from=row.filter(s=>!inactive(effective,s.id));
+  const labels=next.length===2?next.map(b=>{
+    if(from.length===1)return label(from[0],b);
+    const values=from.map(a=>routeMinutes(day,a,b));if(values.some(v=>v==null))return '';
+    const min=Math.min(...values as number[]),max=Math.max(...values as number[]);return `約 ${min}${min===max?'':`–${max}`} 分鐘`;
+  }):row.map(a=>label(a,next[0]));
+  const color=route?'#1F3FB0':`url(#${uid}-${i})`;
+  const lines: {d:string;faded:boolean;phase:number}[]=[];
+  if(linear)lines.push({d:`M${center(1,0)} 0 V100`,faded:false,phase:0});
+  else {
+   row.forEach((a,j)=>{const x=center(row.length,j);lines.push({d:`M${x} 0 V15 Q${x} 25 ${x+(junction-x)*.08} 25 H${junction+(x-junction)*.08} Q${junction} 25 ${junction} 35`,faded:inactive(effective,a.id),phase:0});});
+   lines.push({d:`M${junction} 35 V65`,faded:false,phase:0});
+   next.forEach((b,j)=>{const x=center(next.length,j);lines.push({d:`M${junction} 65 Q${junction} 75 ${junction+(x-junction)*.08} 75 H${x+(junction-x)*.08} Q${x} 75 ${x} 85 V100`,faded:inactive(effective,b.id),phase:1});});
+  }
+  return <div className={`relative flex items-center ${linear?'min-h-[48px]':'min-h-[100px]'} ${route?'py-2':'py-3'}`}>
+   {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
+    <defs><linearGradient id={`${uid}-${i}`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0%" stopColor="#C8C3B8" stopOpacity=".45"/><stop offset="50%" stopColor="#C8C3B8"/><stop offset="100%" stopColor="#C8C3B8" stopOpacity=".45"/></linearGradient></defs>
+    {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={l.faded?'#B9B5AD':color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?.35:1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</svg>}
+   <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 pointer-events-none ${labels.length===2?'grid-cols-2':'grid-cols-1'} ${linear&&route?'pl-10':''}`}>
+    {labels.map((text,j)=><div key={j} className={`min-w-0 ${linear&&route?'text-left':'text-center'} ${inactive(effective,(next.length===2?next[j]:row[j]).id)?'opacity-40':''}`}>
+     {text&&<span className="inline-block rounded-full bg-[#EDEBE6] px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words">{text}</span>}
+    </div>)}
+   </motion.div>
+  </div>;
+ }
  return <div className={route?'space-y-4':''}>
  <div className={route?'rounded-3xl bg-[#F4F2ED] p-4 sm:p-5 shadow-sm ring-1 ring-black/[0.06]':''}>
- {route&&<div className="flex items-center justify-between gap-2 pb-4 mb-4 border-b border-black/[0.06]"><div><p className="text-xs font-medium text-[#5E5A52]">Route Overview</p><h3 className="text-base font-semibold text-[#1A1A1A] mt-0.5">Day {day.dayNumber} · {rows.length} 個站點</h3></div><span className="text-xs font-mono text-[#5E5A52] tabular-nums text-right">{day.stops[0]?.time} – {day.stops[day.stops.length-1]?.time}</span></div>}
- {rows.map((row,i)=>{const next=rows[i+1], group=day.optionalGroups?.find(g=>g.eventIds[0]===row[0].id);const linear=row.length===1&&next?.length===1;
- return <React.Fragment key={row[0].id}>
+ {route&&<><div className="flex items-center justify-between gap-2 pb-4 mb-3 border-b border-black/[0.06]"><div><p className="text-xs font-medium text-[#5E5A52]">Route Overview</p><h3 className="text-base font-semibold text-[#1A1A1A] mt-0.5">Day {day.dayNumber} · {rows.length} 個站點</h3></div><span className="text-xs font-mono text-[#5E5A52] tabular-nums text-right">{day.stops[0]?.time} – {day.stops[day.stops.length-1]?.time}</span></div><p className="text-xs text-[#5E5A52] mb-4">{travelSummary(effective)}</p></>}
+ <div ref={root}>
+ {rows.map((row,i)=>{const next=rows[i+1],group=day.optionalGroups?.find(g=>g.eventIds[0]===row[0].id),chosen=effective.optionalGroups?.find(g=>g.eventIds[0]===row[0].id)?.selectedEventId;return <React.Fragment key={row[0].id}>
  <motion.div {...anim(i*step)} className={`grid items-stretch gap-2 ${row.length===2?'grid-cols-2':'grid-cols-1'}`}>
- {row.map((stop,j)=><div key={stop.id} className="min-w-0 flex flex-col relative">
- {route&&next&&<div aria-hidden="true" className="absolute left-[13px] top-8 bottom-0 w-px bg-[#D2CEC4] overflow-hidden"><motion.div className="absolute inset-0 origin-top" style={{background:inactive(day,stop.id)?'#B9B5AD':'#1F3FB0'}} initial={animated?{scaleY:0}:false} animate={{scaleY:1}} transition={{duration:animated?.18:0,delay:animated?i*step+.28:0,ease:'linear'}}/></div>}
- <div className={`flex-1 ${route?'':'[&>article]:h-full'} ${inactive(day,stop.id)?'opacity-40':''}`}>
- {route?<div className="flex gap-2.5 items-start relative"><span className="flex shrink-0 w-7 h-7 rounded-full bg-[#1F3FB0] text-white items-center justify-center text-xs font-semibold tabular-nums">{i+1}{row.length===2?(j===0?'A':'B'):''}</span><div className={`min-w-0 flex-1 ${row.length===1?'pr-10':''}`}><div className="flex flex-wrap items-center gap-1.5"><span className="font-mono text-[11px] font-medium text-[#5E5A52] tabular-nums">{stop.time}</span><CategoryBadge category={stop.category}/></div><h4 className="mt-1 text-[15px] font-semibold text-[#1A1A1A] leading-snug break-words">{stop.title}</h4><p className="mt-0.5 text-xs text-[#5E5A52] break-words">{stop.locationName}</p><a href={buildStopMapsUrl(stop.mapQuery)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${stop.title} in Google Maps`} className={`${row.length===1?'absolute right-0 top-0':'mt-2'} inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded-full bg-[#EDEBE6] text-[#1F3FB0] ring-1 ring-black/[0.06]`}><ArrowUpRight className="w-4 h-4"/></a></div></div>:<StopCard compact={row.length===2} stop={stop} customPhotoUrl={photos?.[stop.id]?.[0]??''} onSelect={onSelect!}/>}
+ {row.map((stop,j)=>{const faded=inactive(effective,stop.id),confirmed=!!group?.selectedEventId;return <div key={stop.id} className="min-w-0 flex flex-col relative">
+ {route&&row.length===1&&next&&<motion.div aria-hidden="true" className="absolute left-[13.25px] top-7 bottom-0 w-[1.5px] bg-[#1F3FB0] origin-top" initial={animated?{scaleY:0}:false} animate={{scaleY:1}} transition={{duration:animated?.24:0,delay:animated?i*step:0}}/>}
+ <div className={`flex-1 ${route?'':'[&>article]:h-full'} ${faded?'opacity-40':''}`}>
+ {route?<div className={`relative ${row.length===2?'flex flex-col items-center text-center gap-1 rounded-xl bg-white/50 p-2 h-full':'flex items-start gap-2.5'}`}><span className="flex shrink-0 w-7 h-7 rounded-full bg-[#1F3FB0] text-white items-center justify-center text-xs font-semibold tabular-nums">{i+1}{row.length===2?(j===0?'A':'B'):''}</span><div className={`min-w-0 flex-1 ${row.length===1?'pr-10':''}`}><div className={`flex flex-wrap items-center gap-1.5 ${row.length===2?'justify-center':''}`}><span className="font-mono text-[11px] font-medium text-[#5E5A52] tabular-nums">{stop.time}</span><CategoryBadge category={stop.category}/></div><h4 className="mt-1 text-[15px] font-semibold text-[#1A1A1A] leading-snug break-words">{stop.title}</h4><p className="mt-0.5 text-xs text-[#5E5A52] break-words">{stop.locationName}</p><a href={buildStopMapsUrl(stop.mapQuery)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${stop.title} in Google Maps`} className={`${row.length===1?'absolute right-0 top-0':'mt-2'} inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded-full bg-[#EDEBE6] text-[#1F3FB0] ring-1 ring-black/[0.06]`}><ArrowUpRight className="w-4 h-4"/></a></div></div>:<StopCard compact={row.length===2} stop={stop} customPhotoUrl={photos?.[stop.id]?.[0]??''} onSelect={onSelect!}/>}
  </div>
- {group&&<div className={`text-center text-xs py-1 ${route?'text-[#5E5A52]':''}`}>{group.selectedEventId===stop.id?'✓ 已選擇':group.selectedEventId?'未前往':'備選行程'}{onChoose&&!route&&<button type="button" className="block mx-auto rounded-full bg-white px-3 py-2 mt-1 text-[#1F3FB0]" onClick={()=>onChoose(group.eventIds,group.selectedEventId===stop.id?null:stop.id)}>{group.selectedEventId===stop.id?'取消選擇':'選擇此行程'}</button>}</div>}
- </div>)}
+ {group&&<div className="text-center text-xs py-2 text-[#5E5A52] space-y-1">{confirmed?<><p>{group.selectedEventId===stop.id?'✓ 已前往':'未前往'}</p>{onConfirm&&group.selectedEventId===stop.id&&<button type="button" className="rounded-full bg-white px-2 py-2 text-[#1F3FB0]" onClick={()=>onConfirm(group.eventIds,null)}>解除確認</button>}</>:<><button type="button" aria-pressed={chosen===stop.id} className={`rounded-full px-2 py-2 ${chosen===stop.id?'bg-[#1F3FB0] text-white':'bg-white text-[#1F3FB0]'}`} onClick={()=>onPreview(group.eventIds,chosen===stop.id?null:stop.id)}>{chosen===stop.id?'取消預覽':'預覽此行程'}</button>{onConfirm&&chosen===stop.id&&<button type="button" className="block mx-auto rounded-full bg-[#1F3FB0] text-white px-2 py-2" onClick={()=>onConfirm(group.eventIds,stop.id)}>確認實際前往</button>}</>}</div>}
+ </div>})}
  </motion.div>
- {next&&(linear&&!route?<TransitConnector transitText={edgeText(row[0],next[0],true)}/>:<div className={`relative ${linear?'min-h-[48px]':'min-h-[84px]'} flex items-center ${route?'py-2':'py-3'}`}>
- <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute top-0 bottom-0 h-full overflow-visible" style={route?{left:14,width:'calc(100% - 20px)'}:{left:0,width:'100%'}} aria-hidden="true">
- <defs><linearGradient id={`${gradientId}-${i}`} x1="0%" y1="0%" x2="0%" y2="100%" gradientUnits="objectBoundingBox"><stop offset="0%" stopColor="#C8C3B8" stopOpacity=".45"/><stop offset="50%" stopColor="#C8C3B8"/><stop offset="100%" stopColor="#C8C3B8" stopOpacity=".45"/></linearGradient><clipPath id={`${gradientId}-clip-${i}`} clipPathUnits="userSpaceOnUse"><motion.rect x="-5" y="0" width="110" height="100" initial={animated?{height:0}:false} animate={{height:100}} transition={{duration:animated?.32:0,delay:animated?i*step+.46:0,ease:'linear'}}/></clipPath></defs>
- {row.flatMap((a,j)=>next.map((b,k)=>{const x=route?(row.length===1?0:j*50):(row.length===1?50:j===0?25:75),y=route?(next.length===1?0:k*50):(next.length===1?50:k===0?25:75);const faded=inactive(day,a.id)||inactive(day,b.id);const d=`M${x} 0 V20 C${x} 50 ${y} 50 ${y} 80 V100`;return route?<React.Fragment key={`${a.id}-${b.id}`}><path d={d} fill="none" stroke="#D2CEC4" strokeWidth="1.4" vectorEffect="non-scaling-stroke" opacity={faded?.35:1}/><g clipPath={`url(#${gradientId}-clip-${i})`}><path d={d} fill="none" stroke={faded?'#B9B5AD':'#1F3FB0'} strokeWidth="1.4" vectorEffect="non-scaling-stroke" opacity={faded?.35:1}/></g></React.Fragment>:<path key={`${a.id}-${b.id}`} d={d} fill="none" stroke={x===y?'#C8C3B8':`url(#${gradientId}-${i})`} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" opacity={faded?.35:1} strokeDasharray={faded?'4 4':undefined}/>;}))}</svg>
- <motion.div {...anim(i*step+.32)} className={`relative w-full grid gap-2 pointer-events-none ${linear?'grid-cols-1':'grid-cols-2'} ${route?'pl-10':''}`}>
- {row.flatMap(a=>next.map(b=>{const label=edgeText(a,b,!!linear);return <div key={`${a.id}-${b.id}`} className={`${route?'text-left':'text-center'} min-w-0 ${inactive(day,a.id)||inactive(day,b.id)?'opacity-40':''}`}>{label&&<span className="inline-block rounded-full bg-[#EDEBE6] px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words">{label}</span>}</div>}))}
- </motion.div></div>)}
+ {next&&connector(row,next,i)}
  </React.Fragment>})}
- </div>
- {route&&(day.optionalGroups?.some(g=>!g.selectedEventId)?<p className="text-xs text-center text-[#5E5A52]">選定所有備選行程後可開啟完整路線。</p>:<a className="w-full min-h-[52px] flex items-center justify-center gap-2 rounded-2xl bg-[#1F3FB0] px-5 py-3.5 text-sm font-semibold text-white shadow-sm" href={buildFullDayMapsUrl(day.stops.filter(s=>!inactive(day,s.id)))} target="_blank" rel="noopener noreferrer"><Navigation className="w-4 h-4"/>Open Full Day Route in Google Maps</a>)}
+ </div></div>
+ {day.optionalGroups?.some(g=>!g.selectedEventId)&&<p className="text-xs text-center text-[#5E5A52] mt-2">個人預覽不會更改共享行程；實際行程由管理員確認及發佈。</p>}
+ {route&&(effective.optionalGroups?.some(g=>!g.selectedEventId)?<p className="text-xs text-center text-[#5E5A52]">選定所有備選行程後可開啟完整路線。</p>:<a className="w-full min-h-[52px] flex items-center justify-center gap-2 rounded-2xl bg-[#1F3FB0] px-5 py-3.5 text-sm font-semibold text-white shadow-sm" href={buildFullDayMapsUrl(day.stops.filter(s=>!inactive(effective,s.id)))} target="_blank" rel="noopener noreferrer"><Navigation className="w-4 h-4"/>Open Full Day Route in Google Maps</a>)}
  </div>
 }

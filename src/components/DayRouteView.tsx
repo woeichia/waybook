@@ -1,4 +1,4 @@
-import { routeLabel } from '../utils/branchRoutes';
+import { routeLabel, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -39,6 +39,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
           </span>
         </div>
 
+        <p className="mt-3 text-xs text-[#5E5A52]">{travelSummary(day)}</p>
         <ol className="mt-4 space-y-0">
           {day.stops.map((stop, idx) => {
             const isLast = idx === day.stops.length - 1;

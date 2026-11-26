@@ -1,3 +1,4 @@
+import { groupKey, type RoutePreview } from './utils/branchRoutes';
 import { BranchTimeline } from './components/BranchTimeline';
 import React, { useEffect, useState } from 'react';
 import { WifiOff, Pencil } from 'lucide-react';
@@ -64,6 +65,7 @@ export default function App() {
   } }, []);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [dayDirection, setDayDirection] = useState(1);
+  const [routePreview, setRoutePreview] = useState<RoutePreview>({});
   const [viewMode, setViewMode] = useState<ItineraryViewMode>('timeline');
   const [selectedStop, setSelectedStop] = useState<ItineraryStop | null>(null);
   const selectedSourceRef = React.useRef<{x:number;y:number;width:number;height:number}|null>(null);
@@ -482,6 +484,20 @@ export default function App() {
     handleSelectDay(next);
   };
   const activeDay = itinerary.days[selectedDayIndex] ?? itinerary.days[0];
+  const previewChoice = (ids:[string,string],id:string|null) => {
+    if(!activeDay || activeDay.optionalGroups?.find(g=>g.eventIds[0]===ids[0])?.selectedEventId) return;
+    const key=groupKey(activeDay,ids);
+    setRoutePreview(old=>{const next={...old}; if(id)next[key]=id;else delete next[key];return next;});
+  };
+  const confirmChoice = (ids:[string,string],id:string|null) => {
+    if(!isAdmin || !activeDay || (id!==null&&!ids.includes(id))) return;
+    if(!window.confirm(id?'確認實際前往此行程？請發佈以同步給家人。':'解除已確認行程？請發佈以同步給家人。')) return;
+    const key=groupKey(activeDay,ids);
+    setRoutePreview(old=>{const next={...old};delete next[key];return next;});
+    unpublishedEditsRef.current=true;
+    setItinerary(current=>({...current,days:current.days.map((day,i)=>i===selectedDayIndex?{...day,optionalGroups:day.optionalGroups?.map(g=>g.eventIds[0]===ids[0]&&g.eventIds[1]===ids[1]?{...g,selectedEventId:id}:g)}:day)}));
+  };
+
 
   return (
     <MotionConfig reducedMotion="user">
@@ -580,7 +596,7 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <BranchTimeline day={activeDay} photos={photoGalleries} onSelect={openPostcard} onChoose={isAdmin?(ids,id)=>{unpublishedEditsRef.current=true;setItinerary(current=>({...current,days:current.days.map((day,i)=>i===selectedDayIndex?{...day,optionalGroups:day.optionalGroups?.map(g=>g.eventIds[0]===ids[0]?{...g,selectedEventId:id}:g)}:day)}));}:undefined}/>
+                      <BranchTimeline day={activeDay} photos={photoGalleries} onSelect={openPostcard} preview={routePreview} onPreview={previewChoice} onConfirm={isAdmin?confirmChoice:undefined}/>
                     )}
                   </motion.div>
                 )}
@@ -593,7 +609,7 @@ export default function App() {
                     exit={{ opacity: 0, x: dayDirection * -26, rotateY: dayDirection * 24, scale: 0.97 }}
                     transition={{ duration: 0.33, ease: TACTILE_EASE }}
                   >
-                    {activeDay.optionalGroups?.length ? <BranchTimeline day={activeDay} route/> : <DayRouteView day={activeDay} />}
+                    {activeDay.optionalGroups?.length ? <BranchTimeline day={activeDay} route preview={routePreview} onPreview={previewChoice} onConfirm={isAdmin?confirmChoice:undefined}/> : <DayRouteView day={activeDay} />}
                   </motion.div>
                 )}
               </AnimatePresence>

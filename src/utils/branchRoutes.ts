@@ -33,7 +33,6 @@ export function parseBranchData(day:ItineraryDay,raw:Record<string,unknown>): st
     if(!g||!Array.isArray(g.eventIds)||g.eventIds.length!==2||g.eventIds.some(id=>typeof id!=='string'||used.has(id))||g.eventIds[0]===g.eventIds[1]) return '備選行程 ID 不正確或重複';
     const i=day.stops.findIndex(s=>s.id===g.eventIds[0]);
     if(i<0||day.stops[i+1]?.id!==g.eventIds[1]|| (g.selectedEventId!=null&&!g.eventIds.includes(g.selectedEventId))) return '備選行程必須為相鄰的兩個活動';
-    if(groups.some(p=>day.stops.findIndex(s=>s.id===p.eventIds[1])===i-1||day.stops.findIndex(s=>s.id===p.eventIds[0])===i+2)) return '備選行程之間必須有共同站點';
     g.eventIds.forEach(id=>used.add(id));groups.push({eventIds:[...g.eventIds],selectedEventId:g.selectedEventId??null});
   }
   day.optionalGroups=groups;
@@ -45,4 +44,40 @@ export function parseBranchData(day:ItineraryDay,raw:Record<string,unknown>): st
     routes.push({fromEventId:r.fromEventId,toEventId:r.toEventId,durationMinutes:Math.round(r.durationMinutes),...(r.transportMode?{transportMode:r.transportMode}:{}),...(typeof r.notes==='string'?{notes:r.notes.slice(0,500)}:{})});
   }
   day.travelRoutes=routes; return null;
+}
+
+export type RoutePreview = Record<string,string>;
+export function groupKey(day:ItineraryDay, ids:[string,string]) { return JSON.stringify([day.date,...ids]); }
+export function effectiveChoice(day:ItineraryDay, ids:[string,string], preview:RoutePreview) {
+ const g=day.optionalGroups?.find(g=>g.eventIds[0]===ids[0]&&g.eventIds[1]===ids[1]);
+ const id=g?.selectedEventId || preview[groupKey(day,ids)];
+ return ids.includes(id) ? id : null;
+}
+export function previewDay(day:ItineraryDay, preview:RoutePreview):ItineraryDay {
+ return {...day,optionalGroups:day.optionalGroups?.map(g=>({...g,selectedEventId:effectiveChoice(day,g.eventIds,preview)}))};
+}
+export function routeMinutes(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop):number|undefined {
+ const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);
+ if(r) return r.durationMinutes;
+ if(!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id))) return b.schedule?.travelFromPreviousMinutes;
+}
+export function totalTravel(day:ItineraryDay):{min:number;max:number}|null {
+ const rows=slots(day).map(row=>row.filter(s=>!inactive(day,s.id)));
+ if(!rows.length) return null;
+ let totals=new Map(rows[0].map(s=>[s.id,{min:0,max:0}]));
+ for(let i=1;i<rows.length;i++) {
+  const next=new Map<string,{min:number;max:number}>();
+  for(const b of rows[i]) {
+   const values=rows[i-1].map(a=>{const t=totals.get(a.id), m=routeMinutes(day,a,b);return t&&m!=null?{min:t.min+m,max:t.max+m}:null;});
+   if(values.some(v=>!v)) return null;
+   next.set(b.id,{min:Math.min(...values.map(v=>v!.min)),max:Math.max(...values.map(v=>v!.max))});
+  }
+  totals=next;
+ }
+ return {min:Math.min(...Array.from(totals.values(),v=>v.min)),max:Math.max(...Array.from(totals.values(),v=>v.max))};
+}
+export function travelSummary(day:ItineraryDay) {
+ const t=totalTravel(day); if(!t)return '預計交通時間：尚未完整估算';
+ const fmt=(m:number)=>m>=60?`${Math.floor(m/60)} 小時${m%60?` ${m%60} 分鐘`:''}`:`${m} 分鐘`;
+ return `預計交通時間：約 ${fmt(t.min)}${t.min!==t.max?` – ${fmt(t.max)}`:''}`;
 }

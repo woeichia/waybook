@@ -21,11 +21,11 @@ export const StopCard: React.FC<StopCardProps> = ({ stop, customPhotoUrl, onSele
   const mapsUrl = buildStopMapsUrl(stop.mapQuery);
 
   return (
-    <article data-waybook-stop-id={stop.id} ref={cardRef} className="rounded-3xl bg-[#F4F2ED] p-3.5 shadow-sm ring-1 ring-black/[0.06] transition-[transform,box-shadow] duration-150 hover:shadow-md active:scale-[0.985] cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1F3FB0]"
+    <article data-waybook-stop-id={stop.id} ref={cardRef} className={`${compact?'h-full flex flex-col':''} rounded-3xl bg-[#F4F2ED] p-3.5 shadow-sm ring-1 ring-black/[0.06] transition-[transform,box-shadow] duration-150 hover:shadow-md active:scale-[0.985] cursor-pointer focus-visible:outline-2 focus-visible:outline-[#1F3FB0]`}
       tabIndex={0} role="group" aria-label={`活動：${stop.title}，按 Enter 開啟詳情`}
       onClick={e=>{if(!(e.target as HTMLElement).closest('button,a'))openPostcard();}}
       onKeyDown={e=>{if(e.target===e.currentTarget&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openPostcard();}}}>
-      <div className={compact?"flex flex-col gap-2":"flex items-stretch gap-3.5"}>
+      <div className={compact?"flex flex-col gap-2 flex-1":"flex items-stretch gap-3.5"}>
         <button
           type="button"
           onClick={openPostcard}
