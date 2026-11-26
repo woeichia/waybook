@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState, useId } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
@@ -13,6 +13,30 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
  const animated=route&&!reduced, step=.85;
  const root=useRef<HTMLDivElement>(null), [width,setWidth]=useState(0);
  useLayoutEffect(()=>{const el=root.current;if(!el)return;const measure=()=>setWidth(el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect();},[]);
+ const maskPrefix=useId().replace(/[^a-zA-Z0-9_-]/g,'');
+ // Cut connector strokes out of the translucent transport strips, without changing geometry.
+ useLayoutEffect(()=>{
+  const el=root.current;if(!el)return;
+  const update=()=>{
+   el.querySelectorAll<SVGSVGElement>('svg[data-transport-connector]').forEach(svg=>{
+    const holes=svg.querySelector<SVGGElement>('[data-transport-mask-holes]');
+    const parent=svg.parentElement;if(!holes||!parent)return;
+    const bounds=svg.getBoundingClientRect();const vb=svg.viewBox.baseVal;
+    if(!bounds.width||!bounds.height)return;
+    const rects=Array.from(parent.querySelectorAll<HTMLElement>('[data-transport-strip]')).map(strip=>{
+     const b=strip.getBoundingClientRect();const r=document.createElementNS('http://www.w3.org/2000/svg','rect');
+     r.setAttribute('x',String((b.left-bounds.left-1)*vb.width/bounds.width));
+     r.setAttribute('y',String((b.top-bounds.top-1)*vb.height/bounds.height));
+     r.setAttribute('width',String((b.width+2)*vb.width/bounds.width));
+     r.setAttribute('height',String((b.height+2)*vb.height/bounds.height));
+     r.setAttribute('fill','black');return r;
+    });holes.replaceChildren(...rects);
+   });
+  };
+  update();const observer=new ResizeObserver(update);observer.observe(el);
+  el.querySelectorAll<HTMLElement>('[data-transport-strip], [data-transport-connector]').forEach(node=>observer.observe(node));
+  return()=>observer.disconnect();
+ });
  const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
  const center=(count:number,index:number)=>count===1?(route?14:width/2):index===0?(width-8)/4:(3*width+8)/4;
  function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
@@ -29,9 +53,10 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    next.forEach((b,j)=>{const x=center(next.length,j);lines.push({d:`M${junction} 65 Q${junction} 75 ${junction+(x-junction)*.08} 75 H${x+(junction-x)*.08} Q${x} 75 ${x} 85 V100`,faded:inactive(effective,b.id),phase:1});});
   }
   return <div className={`relative flex items-center ${linear?(route?'min-h-[58px]':instructions.some(xs=>xs.length)?'min-h-[40px]':'min-h-[24px]'):'min-h-[100px]'} ${route?'py-2':'py-3'}`}>
-   {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
+   {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" data-transport-connector="" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
+    <defs><mask id={`${maskPrefix}-transport-${i}`} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={-4} y={-4} width={width+8} height={108} style={{maskType:'luminance'}}><rect x={-4} y={-4} width={width+8} height={108} fill="white"/><g data-transport-mask-holes=""/></mask></defs><g mask={`url(#${maskPrefix}-transport-${i})`}>
 
-    {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={route&&l.faded?'#B9B5AD':color} strokeWidth={route?1.5:2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?(route?.35:.18):1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</svg>}
+    {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={route&&l.faded?'#B9B5AD':color} strokeWidth={route?1.5:2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?(route?.35:.18):1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</g></svg>}
    <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 items-start ${pairs.length===2?'grid-cols-2':'grid-cols-1'} ${linear&&route?'pl-10':''}`}>
     {instructions.map((items,j)=><div key={j} className={`min-w-0 ${linear&&route?'text-left':'text-center'} ${inactive(effective,(next.length===2?next[j]:row[j]).id)?'opacity-40':''}`}>
      {items.map(item=><TransportDisclosure key={item.key} text={item.text} modeKeys={item.modeKeys} enabled={item.enabled} duration={item.enabled?item.duration:undefined} from={pairs[j].length>1?item.from:undefined}/>)}
