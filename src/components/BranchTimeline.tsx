@@ -1,19 +1,19 @@
-import React, { useId, useLayoutEffect, useRef, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
-import { slots, inactive, routeLabel, routeMinutes, previewDay, travelSummary, bufferSummary, type RoutePreview } from '../utils/branchRoutes';
+import { slots, inactive, routeLabel, routeMinutes, routeInstructions, previewDay, travelSummary, bufferSummary, type RoutePreview } from '../utils/branchRoutes';
 import { StopCard } from './StopCard';
 import { CategoryBadge } from './CategoryBadge';
 import { buildStopMapsUrl, buildFullDayMapsUrl } from '../utils/itinerary';
 interface Props {day:ItineraryDay; photos?:Record<string,string[]>; onSelect?:(stop:ItineraryStop,rect:DOMRect)=>void; preview:RoutePreview; onPreview:(ids:[string,string],id:string|null)=>void; onConfirm?:(ids:[string,string],id:string|null)=>void; route?:boolean}
 export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,route=false}:Props) {
- const effective=previewDay(day,preview), rows=slots(day), reduced=useReducedMotion(), uid=useId().replace(/:/g,'');
+ const effective=previewDay(day,preview), rows=slots(day), reduced=useReducedMotion();
  const animated=route&&!reduced, step=.85;
  const root=useRef<HTMLDivElement>(null), [width,setWidth]=useState(0);
  useLayoutEffect(()=>{const el=root.current;if(!el)return;const measure=()=>setWidth(el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect();},[]);
  const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
- const label=(a:ItineraryStop,b:ItineraryStop)=>routeLabel(day,a,b)||((!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id)))?a.transitToNext?.trim():'')||'';
+ const label=(a:ItineraryStop,b:ItineraryStop)=>routeLabel(day,a,b)||'';
  const center=(count:number,index:number)=>count===1?(route?14:width/2):index===0?(width-8)/4:(3*width+8)/4;
  function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
   const linear=row.length===1&&next.length===1, junction=width/2;
@@ -24,10 +24,10 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
     const values=from.map(a=>routeMinutes(day,a,b));if(values.some(v=>v==null))return '';
     const min=Math.min(...values as number[]),max=Math.max(...values as number[]);return `約 ${min}${min===max?'':`–${max}`} 分鐘`;
   }):row.map(a=>label(a,next[0]));
-  const shownLabels=route?labels:pairs.map(ps=>{const values=ps.map(([a,b])=>routeMinutes(day,a,b));if(!values.length||values.some(v=>v==null))return '';const min=Math.min(...values as number[]),max=Math.max(...values as number[]);return `約 ${min}${min===max?'':`–${max}`} 分鐘`;});
+  const shownLabels=route?labels:labels.map(()=> '');
   const buffers=route?pairs.map(ps=>bufferSummary(day,ps)):[];
-  const notes=route?pairs.map(ps=>{if(ps.length!==1)return '';const [a,b]=ps[0];return day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id)?.notes?.trim()||'';}):[];
-  const color=route?'#1F3FB0':`url(#${uid}-${i})`;
+  const instructions=pairs.map(ps=>ps.map(([a,b])=>({key:a.id+'>'+b.id,from:a.title,text:routeInstructions(day,a,b,!route)})).filter(x=>x.text));
+  const color=route?'#1F3FB0':'#777777';
   const lines: {d:string;faded:boolean;phase:number}[]=[];
   if(linear)lines.push({d:`M${center(1,0)} 0 V100`,faded:false,phase:0});
   else {
@@ -35,14 +35,14 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    lines.push({d:`M${junction} 35 V65`,faded:false,phase:0});
    next.forEach((b,j)=>{const x=center(next.length,j);lines.push({d:`M${junction} 65 Q${junction} 75 ${junction+(x-junction)*.08} 75 H${x+(junction-x)*.08} Q${x} 75 ${x} 85 V100`,faded:inactive(effective,b.id),phase:1});});
   }
-  return <div className={`relative flex items-center ${linear?(route?'min-h-[58px]':shownLabels.some(Boolean)?'min-h-[40px]':'min-h-[24px]'):'min-h-[100px]'} ${route?'py-2':'py-3'}`}>
+  return <div className={`relative flex items-center ${linear?(route?'min-h-[58px]':instructions.some(xs=>xs.length)?'min-h-[40px]':'min-h-[24px]'):'min-h-[100px]'} ${route?'py-2':'py-3'}`}>
    {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
-    <defs><linearGradient id={`${uid}-${i}`} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="100"><stop offset="0%" stopColor="#C8C3B8" stopOpacity=".45"/><stop offset="50%" stopColor="#C8C3B8"/><stop offset="100%" stopColor="#C8C3B8" stopOpacity=".45"/></linearGradient></defs>
-    {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={l.faded?'#B9B5AD':color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?.35:1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</svg>}
+
+    {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={route&&l.faded?'#B9B5AD':color} strokeWidth={route?1.5:2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?(route?.35:.18):1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</svg>}
    <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 pointer-events-none ${labels.length===2?'grid-cols-2':'grid-cols-1'} ${linear&&route?'pl-10':''}`}>
     {shownLabels.map((text,j)=><div key={j} className={`min-w-0 ${linear&&route?'text-left':'text-center'} ${inactive(effective,(next.length===2?next[j]:row[j]).id)?'opacity-40':''}`}>
-     {text&&<span className={`inline-block rounded-full px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words ${route?'bg-[#EDEBE6]':'bg-[#F4F2ED]'}`}>{text}</span>}
-     {route&&notes[j]&&<p className="mt-1 rounded-lg bg-[#F4F2ED] px-2 text-[10px] text-[#5E5A52] break-words">{notes[j]}</p>}
+     {text&&<span className={`inline-block rounded-full px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words ${route?'bg-[#EDEBE6] text-[15px] font-semibold text-[#1F3FB0]':'bg-[#F4F2ED]'}`}>{text}</span>}
+     {instructions[j]?.filter(item=>item.text!==text).map(item=><p key={item.key} className="mt-1 rounded-lg bg-[#F4F2ED] px-2 py-1 text-[11px] text-[#5E5A52] break-words leading-relaxed">{pairs[j].length>1&&<span className="block font-semibold">從 {item.from} 出發</span>}{item.text}</p>)}
      {route&&buffers[j]&&<div><span className={`inline-block rounded-full bg-[#F4F2ED] px-2 py-0.5 text-[10px] ${buffers[j]!.warning?'text-red-700':'text-[#5E5A52]'}`}>{buffers[j]!.text}</span></div>}
     </div>)}
    </motion.div>

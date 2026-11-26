@@ -116,3 +116,18 @@ export function bufferSummary(day:ItineraryDay,pairs:[ItineraryStop,ItinerarySto
  if(min<0)return {text:`不足 ${-min} 至緩衝 ${max} 分鐘`,warning:true};
  return {text:`緩衝 ${min}–${max} 分鐘`,warning:false};
 }
+
+// Keep legacy free-text directions, but remove explicit journey-duration phrases in Timeline.
+export function withoutTravelDuration(text:string):string {
+ return text.replace(/(?:約|大約|預計|大概)?\s*\d+(?:\.\d+)?\s*[-–—~～至]\s*\d+(?:\.\d+)?\s*(?:小時|鐘頭|hours?|hrs?)/gi,'').replace(/(?:約|大約|預計|大概|車程|步行約)?\s*\d+(?:\.\d+)?\s*(?:小時|鐘頭|hours?|hrs?|h)(?:\s*\d+\s*(?:分鐘|分|min(?:utes?)?))?(?:\s*[-–—~～至]\s*\d+(?:\.\d+)?\s*(?:小時|鐘頭|hours?|hrs?|h)(?:\s*\d+\s*(?:分鐘|分|min(?:utes?)?))?)?/gi,'')
+ .replace(/(?:約|大約|預計|大概|車程)?\s*\d+(?:\.\d+)?(?:\s*[-–—~～至]\s*\d+(?:\.\d+)?)?\s*(?:分鐘|min(?:utes?)?\b)/gi,'')
+ .replace(/(?:約|大約|預計|大概)\s*(?=[，、。；;）)]|$)/g,'').replace(/([，、；;])\s*[，、；;]+/g,'$1').replace(/\s*·\s*$/,'').replace(/^[\s，、。；;·]+|[\s，、。；;·]+$/g,'').trim();
+}
+export function routeInstructions(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop,hideDuration=false):string {
+ const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);
+ const linear=!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id));
+ const text=r?.notes?.trim()||(linear?a.transitToNext?.trim():'')||'';
+ const mode=modes[r?.transportMode??'']??'';
+ const cleaned=hideDuration?withoutTravelDuration(text):text;
+ return cleaned||mode;
+}

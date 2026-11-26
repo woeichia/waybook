@@ -1,4 +1,4 @@
-import { routeLabel, travelSummary, bufferSummary } from '../utils/branchRoutes';
+import { routeLabel, routeInstructions, travelSummary, bufferSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -46,7 +46,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
             const next=day.stops[idx+1];
             const buffer=next?bufferSummary(day,[[stop,next]]):null;
             const structured=next?routeLabel(day,stop,next):'';
-            const notes=next?(day.travelRoutes?.find(r=>r.fromEventId===stop.id&&r.toEventId===next.id)?.notes?.trim()|| (structured?stop.transitToNext.trim():'')):'';
+            const notes=next?routeInstructions(day,stop,next):'';
             return (
               <li key={stop.id} className="relative flex gap-3.5">
                 <div className="flex flex-col items-center">
@@ -90,9 +90,9 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                     </a>
                   </div>
 
-                  {!isLast && (
-                    <div className="mt-2.5 inline-flex items-center rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[11px] font-medium text-[#5E5A52]">
-                      {structured || stop.transitToNext.trim() || '前往下一站'}
+                  {!isLast && structured && (
+                    <div className="mt-2.5 inline-flex items-center rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[15px] font-semibold text-[#1F3FB0]">
+                      {structured}
                     </div>
                   )}
                   {notes&&notes!==structured&&<p className="mt-1 text-[11px] text-[#5E5A52] leading-relaxed">{notes}</p>}
