@@ -66,6 +66,8 @@ export default function App() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [dayDirection, setDayDirection] = useState(1);
   const [routePreview, setRoutePreview] = useState<RoutePreview>({});
+  const [journeyView, setJourneyView] = useState<'actual'|'plan'>('actual');
+  const [planPreview, setPlanPreview] = useState<RoutePreview>({});
   const [viewMode, setViewMode] = useState<ItineraryViewMode>('timeline');
   const [selectedStop, setSelectedStop] = useState<ItineraryStop | null>(null);
   const selectedSourceRef = React.useRef<{x:number;y:number;width:number;height:number}|null>(null);
@@ -484,13 +486,16 @@ export default function App() {
     handleSelectDay(next);
   };
   const activeDay = itinerary.days[selectedDayIndex] ?? itinerary.days[0];
+  // A read-only projection of the saved plan: do not modify persisted confirmations.
+  const displayDay = activeDay && journeyView==='plan' ? {...activeDay,optionalGroups:activeDay.optionalGroups?.map(g=>({...g,selectedEventId:null}))} : activeDay;
+  const displayedPreview = journeyView==='plan'?planPreview:routePreview;
   const previewChoice = (ids:[string,string],id:string|null) => {
-    if(!activeDay || activeDay.optionalGroups?.find(g=>g.eventIds[0]===ids[0])?.selectedEventId) return;
-    const key=groupKey(activeDay,ids);
-    setRoutePreview(old=>{const next={...old}; if(id)next[key]=id;else delete next[key];return next;});
+    if(!displayDay || (id!==null&&!ids.includes(id)) || displayDay.optionalGroups?.find(g=>g.eventIds[0]===ids[0])?.selectedEventId) return;
+    const key=groupKey(displayDay,ids);
+    (journeyView==='plan'?setPlanPreview:setRoutePreview)(old=>{const next={...old}; if(id)next[key]=id;else delete next[key];return next;});
   };
   const confirmChoice = (ids:[string,string],id:string|null) => {
-    if(!isAdmin || !activeDay || (id!==null&&!ids.includes(id))) return;
+    if(journeyView==='plan' || !isAdmin || !activeDay || (id!==null&&!ids.includes(id))) return;
     if(!window.confirm(id?'確認實際前往此行程？請發佈以同步給家人。':'解除已確認行程？請發佈以同步給家人。')) return;
     const key=groupKey(activeDay,ids);
     setRoutePreview(old=>{const next={...old};delete next[key];return next;});
@@ -562,6 +567,7 @@ export default function App() {
             {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos} onEstimateRoutes={async stops => { if (!adminToken) throw new Error('請先以管理員身分登入'); return cloudWrite<RoutePlanResponse>('routePlan', {stops}, adminToken); }}
                photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length), ...Object.keys(cloudMemoryRefs).filter(id=>cloudMemoryRefs[id]?.length), ...Object.keys(memoryGalleries).filter(id=>memoryGalleries[id]?.length)])]}
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
+            {(journeyView==='plan'||itinerary.days.some(day=>day.optionalGroups?.some(g=>g.selectedEventId)))&&<div className="mt-3 mb-2 flex justify-end"><label className="sr-only" htmlFor="journey-view">行程顯示模式</label><select id="journey-view" value={journeyView} onChange={e=>{setJourneyView(e.target.value==='plan'?'plan':'actual');setPlanPreview({});}} className="rounded-full bg-[#F4F2ED] ring-1 ring-black/10 px-3 py-2 text-xs text-[#5E5A52]"><option value="actual">實際旅程</option><option value="plan">原始行程</option></select></div>}
             <ViewToggle mode={viewMode} onChange={setViewMode} />
 
             <div className="mt-5" style={{perspective:'1100px',touchAction:'pan-y pinch-zoom'}}
@@ -596,7 +602,7 @@ export default function App() {
                         </p>
                       </div>
                     ) : (
-                      <BranchTimeline day={activeDay} photos={photoGalleries} onSelect={openPostcard} preview={routePreview} onPreview={previewChoice} onConfirm={isAdmin?confirmChoice:undefined}/>
+                      <BranchTimeline day={displayDay!} photos={photoGalleries} onSelect={openPostcard} preview={displayedPreview} onPreview={previewChoice} onConfirm={isAdmin&&journeyView==='actual'?confirmChoice:undefined}/>
                     )}
                   </motion.div>
                 )}
@@ -609,7 +615,7 @@ export default function App() {
                     exit={{ opacity: 0, x: dayDirection * -26, rotateY: dayDirection * 24, scale: 0.97 }}
                     transition={{ duration: 0.33, ease: TACTILE_EASE }}
                   >
-                    {activeDay.optionalGroups?.length ? <BranchTimeline day={activeDay} route preview={routePreview} onPreview={previewChoice} onConfirm={isAdmin?confirmChoice:undefined}/> : <DayRouteView day={activeDay} />}
+                    {activeDay.optionalGroups?.length ? <BranchTimeline day={displayDay!} route preview={displayedPreview} onPreview={previewChoice} onConfirm={isAdmin&&journeyView==='actual'?confirmChoice:undefined}/> : <DayRouteView day={activeDay} />}
                   </motion.div>
                 )}
               </AnimatePresence>
