@@ -17,7 +17,7 @@ export interface ItineraryStop {
 }
 
 export interface OptionalEventGroup { eventIds: [string, string]; selectedEventId?: string | null }
-export interface TravelRoute { fromEventId: string; toEventId: string; durationMinutes: number; transportMode?: string; notes?: string }
+export interface TravelRoute { fromEventId: string; toEventId: string; durationMinutes: number; transportMode?: string; transportModes?: string[]; notes?: string }
 
 export interface ItineraryDay {
   optionalGroups?: OptionalEventGroup[];

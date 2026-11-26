@@ -1,4 +1,4 @@
-import { routeLabel, routeInstructions, modes, travelSummary } from '../utils/branchRoutes';
+import { routeLabel, routeInstructions, routeModes, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { TransportDisclosure } from './TransportDisclosure';
 import { motion, useReducedMotion } from 'motion/react';
@@ -47,7 +47,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
             const next=day.stops[idx+1];
             const structured=next?routeLabel(day,stop,next):'';
             const notes=next?routeInstructions(day,stop,next):'';
-            const mode=modes[day.travelRoutes?.find(r=>r.fromEventId===stop.id&&r.toEventId===next?.id)?.transportMode??'']||'';
+            const modeKeys=next?routeModes(day,stop,next):[];
             return (
               <li key={stop.id} className="relative flex gap-3.5">
                 <div className="flex flex-col items-center">
@@ -96,7 +96,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                       {structured}
                     </div>
                   )}
-                  {notes&&notes!==structured&&<TransportDisclosure key={JSON.stringify([stop.id,next?.id])} text={notes} mode={mode} enabled defaultOpen={false}/>}
+                  {(notes||modeKeys.length>0)&&<TransportDisclosure key={JSON.stringify([stop.id,next?.id])} text={notes} modeKeys={modeKeys} enabled/>}
                 </motion.div>
               </li>
             );

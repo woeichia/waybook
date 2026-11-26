@@ -20,9 +20,17 @@ export function cleanDay(day: ItineraryDay): ItineraryDay {
   return {...result,travelRoutes:(day.travelRoutes??[]).filter(r=>valid.some(e=>e.fromEventId===r.fromEventId&&e.toEventId===r.toEventId))};
 }
 export const modes: Record<string,string>={car:'開車',charter:'包車',mrt:'捷運',walking:'步行',train:'火車',hsr:'高鐵',flight:'飛機',mixed:'轉乘',bus:'公車',taxi:'計程車',ferry:'渡輪'};
+export function routeModes(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop):string[] {
+ const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);
+ return r?.transportModes?.length?r.transportModes:r?.transportMode?[r.transportMode]:[];
+}
+export function routeVisible(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop):boolean {
+ const groups=day.optionalGroups?.filter(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id))??[];
+ return groups.every(g=>!!g.selectedEventId)&&!inactive(day,a.id)&&!inactive(day,b.id);
+}
 export function routeLabel(day:ItineraryDay,a:ItineraryStop,b:ItineraryStop) {
   const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);
-  if(r) return `${modes[r.transportMode??'']??''}${r.transportMode?' · ':''}約 ${r.durationMinutes} 分鐘`;
+  if(r) return `約 ${r.durationMinutes} 分鐘`;
   if (!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id)) && b.schedule?.travelFromPreviousMinutes!=null) return `約 ${b.schedule.travelFromPreviousMinutes} 分鐘`;
   return '';
 }
@@ -40,8 +48,9 @@ export function parseBranchData(day:ItineraryDay,raw:Record<string,unknown>): st
   const allowed=edges(day), seen=new Set<string>(); const routes:TravelRoute[]=[];
   for(const r of (raw.travelRoutes??[]) as TravelRoute[]) {
     if(!r||!allowed.some(e=>e.fromEventId===r.fromEventId&&e.toEventId===r.toEventId)||!Number.isFinite(r.durationMinutes)||r.durationMinutes<0||r.durationMinutes>1440|| (r.transportMode!==undefined&&!Object.hasOwn(modes,r.transportMode))) return '交通路線或時間不正確';
+    if(r.transportModes!==undefined&&(!Array.isArray(r.transportModes)||!r.transportModes.length||r.transportModes.length>20||r.transportModes.some(m=>typeof m!=='string'||m==='mixed'||!Object.hasOwn(modes,m)))) return '交通方式組合不正確';
     const key=JSON.stringify([r.fromEventId,r.toEventId]);if(seen.has(key)) return '交通路線重複';seen.add(key);
-    routes.push({fromEventId:r.fromEventId,toEventId:r.toEventId,durationMinutes:Math.round(r.durationMinutes),...(r.transportMode?{transportMode:r.transportMode}:{}),...(typeof r.notes==='string'?{notes:r.notes.slice(0,500)}:{})});
+    routes.push({fromEventId:r.fromEventId,toEventId:r.toEventId,durationMinutes:Math.round(r.durationMinutes),...(r.transportModes?.length?{transportModes:[...r.transportModes],transportMode:r.transportModes.length>1?'mixed':r.transportModes[0]}:r.transportMode?{transportMode:r.transportMode}:{}),...(typeof r.notes==='string'?{notes:r.notes.slice(0,500)}:{})});
   }
   day.travelRoutes=routes; return null;
 }
@@ -127,7 +136,7 @@ export function routeInstructions(day:ItineraryDay,a:ItineraryStop,b:ItinerarySt
  const r=day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id);
  const linear=!day.optionalGroups?.some(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id));
  const text=r?.notes?.trim()||(linear?a.transitToNext?.trim():'')||'';
- const mode=modes[r?.transportMode??'']??'';
+ const mode=routeModes(day,a,b).map(m=>modes[m]??m).join(' ＋ ');
  const cleaned=hideDuration?withoutTravelDuration(text):text;
  return cleaned||mode;
 }
