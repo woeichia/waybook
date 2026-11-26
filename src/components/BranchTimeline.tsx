@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
-import { slots, inactive, routeLabel, routeMinutes, routeInstructions, previewDay, travelSummary, bufferSummary, type RoutePreview } from '../utils/branchRoutes';
+import { slots, inactive, routeLabel, routeMinutes, routeInstructions, previewDay, travelSummary, type RoutePreview } from '../utils/branchRoutes';
 import { StopCard } from './StopCard';
 import { CategoryBadge } from './CategoryBadge';
 import { buildStopMapsUrl, buildFullDayMapsUrl } from '../utils/itinerary';
@@ -25,7 +25,6 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
     const min=Math.min(...values as number[]),max=Math.max(...values as number[]);return `約 ${min}${min===max?'':`–${max}`} 分鐘`;
   }):row.map(a=>label(a,next[0]));
   const shownLabels=route?labels:labels.map(()=> '');
-  const buffers=route?pairs.map(ps=>bufferSummary(day,ps)):[];
   const instructions=pairs.map(ps=>ps.map(([a,b])=>({key:a.id+'>'+b.id,from:a.title,text:routeInstructions(day,a,b,!route)})).filter(x=>x.text));
   const color=route?'#1F3FB0':'#777777';
   const lines: {d:string;faded:boolean;phase:number}[]=[];
@@ -43,7 +42,6 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
     {shownLabels.map((text,j)=><div key={j} className={`min-w-0 ${linear&&route?'text-left':'text-center'} ${inactive(effective,(next.length===2?next[j]:row[j]).id)?'opacity-40':''}`}>
      {text&&<span className={`inline-block rounded-full px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words ${route?'bg-[#EDEBE6] text-[15px] font-semibold text-[#1F3FB0]':'bg-[#F4F2ED]'}`}>{text}</span>}
      {instructions[j]?.filter(item=>item.text!==text).map(item=><p key={item.key} className="mt-1 rounded-lg bg-[#F4F2ED] px-2 py-1 text-[11px] text-[#5E5A52] break-words leading-relaxed">{pairs[j].length>1&&<span className="block font-semibold">從 {item.from} 出發</span>}{item.text}</p>)}
-     {route&&buffers[j]&&<div><span className={`inline-block rounded-full bg-[#F4F2ED] px-2 py-0.5 text-[10px] ${buffers[j]!.warning?'text-red-700':'text-[#5E5A52]'}`}>{buffers[j]!.text}</span></div>}
     </div>)}
    </motion.div>
   </div>;

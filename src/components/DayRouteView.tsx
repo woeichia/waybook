@@ -1,4 +1,4 @@
-import { routeLabel, routeInstructions, travelSummary, bufferSummary } from '../utils/branchRoutes';
+import { routeLabel, routeInstructions, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -44,7 +44,6 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
           {day.stops.map((stop, idx) => {
             const isLast = idx === day.stops.length - 1;
             const next=day.stops[idx+1];
-            const buffer=next?bufferSummary(day,[[stop,next]]):null;
             const structured=next?routeLabel(day,stop,next):'';
             const notes=next?routeInstructions(day,stop,next):'';
             return (
@@ -96,7 +95,6 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                     </div>
                   )}
                   {notes&&notes!==structured&&<p className="mt-1 text-[11px] text-[#5E5A52] leading-relaxed">{notes}</p>}
-                  {buffer&&<div><span className={`mt-1 inline-block rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[11px] ${buffer.warning?'text-red-700':'text-[#5E5A52]'}`}>{buffer.text}</span></div>}
                 </motion.div>
               </li>
             );
