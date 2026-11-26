@@ -1,5 +1,6 @@
-import { routeLabel, routeInstructions, travelSummary } from '../utils/branchRoutes';
+import { routeLabel, routeInstructions, modes, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
+import { TransportDisclosure } from './TransportDisclosure';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
 import type { ItineraryDay } from '../types/itinerary';
@@ -46,6 +47,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
             const next=day.stops[idx+1];
             const structured=next?routeLabel(day,stop,next):'';
             const notes=next?routeInstructions(day,stop,next):'';
+            const mode=modes[day.travelRoutes?.find(r=>r.fromEventId===stop.id&&r.toEventId===next?.id)?.transportMode??'']||'';
             return (
               <li key={stop.id} className="relative flex gap-3.5">
                 <div className="flex flex-col items-center">
@@ -94,7 +96,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                       {structured}
                     </div>
                   )}
-                  {notes&&notes!==structured&&<p className="mt-1 text-[11px] text-[#5E5A52] leading-relaxed">{notes}</p>}
+                  {notes&&notes!==structured&&<TransportDisclosure key={JSON.stringify([stop.id,next?.id])} text={notes} mode={mode} enabled defaultOpen={false}/>}
                 </motion.div>
               </li>
             );

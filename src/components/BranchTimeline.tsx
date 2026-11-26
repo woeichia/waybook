@@ -2,7 +2,8 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
-import { slots, inactive, routeLabel, routeMinutes, routeInstructions, previewDay, travelSummary, type RoutePreview } from '../utils/branchRoutes';
+import { slots, inactive, routeLabel, routeMinutes, routeInstructions, modes, previewDay, travelSummary, type RoutePreview } from '../utils/branchRoutes';
+import { TransportDisclosure } from './TransportDisclosure';
 import { StopCard } from './StopCard';
 import { CategoryBadge } from './CategoryBadge';
 import { buildStopMapsUrl, buildFullDayMapsUrl } from '../utils/itinerary';
@@ -25,7 +26,14 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
     const min=Math.min(...values as number[]),max=Math.max(...values as number[]);return `約 ${min}${min===max?'':`–${max}`} 分鐘`;
   }):row.map(a=>label(a,next[0]));
   const shownLabels=route?labels:labels.map(()=> '');
-  const instructions=pairs.map(ps=>ps.map(([a,b])=>({key:a.id+'>'+b.id,from:a.title,text:routeInstructions(day,a,b,!route)})).filter(x=>x.text));
+  const instructions=pairs.map(ps=>ps.map(([a,b])=>{
+    const groups=effective.optionalGroups?.filter(g=>g.eventIds.includes(a.id)||g.eventIds.includes(b.id))??[];
+    const blocked=inactive(effective,a.id)||inactive(effective,b.id);
+    const optional=groups.length>0;
+    const resolved=groups.every(g=>!!g.selectedEventId);
+    const mode=modes[day.travelRoutes?.find(r=>r.fromEventId===a.id&&r.toEventId===b.id)?.transportMode??'']||'';
+    return {key:JSON.stringify([a.id,b.id]),from:a.title,text:routeInstructions(day,a,b,!route),mode,enabled:!blocked&&(!optional||resolved),auto:optional&&resolved&&!blocked};
+   }).filter(x=>x.text||x.mode));
   const color=route?'#1F3FB0':'#777777';
   const lines: {d:string;faded:boolean;phase:number}[]=[];
   if(linear)lines.push({d:`M${center(1,0)} 0 V100`,faded:false,phase:0});
@@ -38,10 +46,10 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
 
     {lines.map((l,k)=><motion.path key={k} d={l.d} fill="none" stroke={route&&l.faded?'#B9B5AD':color} strokeWidth={route?1.5:2} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" opacity={l.faded?(route?.35:.18):1} initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?(linear?.55:.27):0,delay:animated?i*step+.24+l.phase*.28:0,ease:'linear'}}/>)}</svg>}
-   <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 pointer-events-none ${labels.length===2?'grid-cols-2':'grid-cols-1'} ${linear&&route?'pl-10':''}`}>
+   <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 items-start ${labels.length===2?'grid-cols-2':'grid-cols-1'} ${linear&&route?'pl-10':''}`}>
     {shownLabels.map((text,j)=><div key={j} className={`min-w-0 ${linear&&route?'text-left':'text-center'} ${inactive(effective,(next.length===2?next[j]:row[j]).id)?'opacity-40':''}`}>
      {text&&<span className={`inline-block rounded-full px-2 py-1 text-[11px] font-medium text-[#5E5A52] break-words ${route?'bg-[#EDEBE6] text-[15px] font-semibold text-[#1F3FB0]':'bg-[#F4F2ED]'}`}>{text}</span>}
-     {instructions[j]?.filter(item=>item.text!==text).map(item=><p key={item.key} className="mt-1 rounded-lg bg-[#F4F2ED] px-2 py-1 text-[11px] text-[#5E5A52] break-words leading-relaxed">{pairs[j].length>1&&<span className="block font-semibold">從 {item.from} 出發</span>}{item.text}</p>)}
+     {instructions[j]?.filter(item=>item.text!==text).map(item=><TransportDisclosure key={`${item.key}:${item.auto}:${item.enabled}`} text={item.text} mode={item.mode} enabled={item.enabled} defaultOpen={item.auto} from={pairs[j].length>1?item.from:undefined}/>)}
     </div>)}
    </motion.div>
   </div>;
