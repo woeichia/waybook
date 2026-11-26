@@ -35,6 +35,31 @@ const SAMPLE_PROMPTS = [
   '3-day Seoul art galleries, markets, and riverside walk for 3 travelers',
 ];
 
+
+/** Self-describing planning export; metadata is ignored by the itinerary importer. */
+function planningExport(data: ItineraryData) {
+  return {
+    ...data,
+    days: data.days.map(day => ({...day, optionalGroups: day.optionalGroups ?? [], travelRoutes: day.travelRoutes ?? []})),
+    waybookPlanningGuide: {
+      version: '4.6.2',
+      instructions: [
+        'Return the full itinerary object with trip and days; use Taiwanese Traditional Chinese for descriptions and route notes.',
+        'Preserve existing stop IDs, media-related fields, confirmed selections and bookings. Give newly added stops unique IDs across the entire trip. Do not silently remove existing stops.',
+        'Optional events are supported even when optionalGroups is empty. Place two alternative stops adjacent in days[].stops, in the same intended time slot, and add their IDs to optionalGroups in that order. Use selectedEventId: null for new undecided groups. Consecutive groups are allowed; no overlapping or nested groups.',
+        'Treat each optional pair as one itinerary slot. Add a travelRoutes entry for every connection between consecutive slots: 1-to-1, 1-to-2, 2-to-1, and all four 2-to-2 combinations. Never connect the two alternatives within the same slot.',
+        'Use route-specific ordered transportModes (including repeated modes if needed). Use transportMode mixed for combinations, otherwise the single mode. The duration is the total journey in minutes including walking, waiting and transfers. Keep notes concise and omit duration expressions from notes. Include station names, lines, transfers and exits when verified.',
+        'Do not invent routes, exits or travel durations. If insufficient information, omit the unknown route and report it separately; do not use zero as a placeholder. Report schedule conflicts separately.',
+        'Use full itinerary import for new optional groups or changed stops; travel-only import requires identical stop IDs, order and optional group membership.'
+      ],
+      allowedTransportModes: ['car','charter','mrt','walking','train','hsr','flight','bus','taxi','ferry'],
+      optionalGroupExample: {eventIds:['EXAMPLE_2A','EXAMPLE_2B'],selectedEventId:null},
+      travelRouteExample: {fromEventId:'EXAMPLE_1',toEventId:'EXAMPLE_2A',transportMode:'mixed',transportModes:['mrt','bus','walking'],durationMinutes:50,notes:'搭乘捷運至指定車站，轉乘公車後步行前往。'},
+      examplesAreIllustrative: true
+    }
+  };
+}
+
 export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   isOpen,
   currentTrip,
@@ -58,7 +83,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setJsonInput(JSON.stringify(currentTrip, null, 2));
+      setJsonInput(JSON.stringify(planningExport(currentTrip), null, 2));
       setJsonError(null);
       setImportPreview(null);
       setAiError(null);
@@ -196,7 +221,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   };
   const handleCopyJson = async () => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(currentTrip, null, 2));
+      await navigator.clipboard.writeText(JSON.stringify(planningExport(currentTrip), null, 2));
       setCopiedState('json');
       setTimeout(() => setCopiedState(null), 2000);
     } catch {
@@ -205,7 +230,7 @@ export const ShareImportSheet: React.FC<ShareImportSheetProps> = ({
   };
 
   const handleDownloadJson = () => {
-    const blob = new Blob([JSON.stringify(currentTrip, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(planningExport(currentTrip), null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

@@ -1,4 +1,4 @@
-import { routeLabel, routeInstructions, routeModes, travelSummary } from '../utils/branchRoutes';
+import { routeMinutes, routeInstructions, routeModes, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
 import { TransportDisclosure } from './TransportDisclosure';
 import { motion, useReducedMotion } from 'motion/react';
@@ -45,7 +45,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
           {day.stops.map((stop, idx) => {
             const isLast = idx === day.stops.length - 1;
             const next=day.stops[idx+1];
-            const structured=next?routeLabel(day,stop,next):'';
+            const duration=next?routeMinutes(day,stop,next):undefined;
             const notes=next?routeInstructions(day,stop,next):'';
             const modeKeys=next?routeModes(day,stop,next):[];
             return (
@@ -91,12 +91,7 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                     </a>
                   </div>
 
-                  {!isLast && structured && (
-                    <div className="mt-2.5 inline-flex items-center rounded-full bg-[#EDEBE6] px-2.5 py-1 text-[15px] font-semibold text-[#1F3FB0]">
-                      {structured}
-                    </div>
-                  )}
-                  {(notes||modeKeys.length>0)&&<TransportDisclosure key={JSON.stringify([stop.id,next?.id])} text={notes} modeKeys={modeKeys} enabled/>}
+                  {!isLast&&(notes||modeKeys.length>0||duration!=null)&&<TransportDisclosure key={JSON.stringify([stop.id,next?.id])} text={notes} modeKeys={modeKeys} enabled duration={duration}/>}
                 </motion.div>
               </li>
             );
