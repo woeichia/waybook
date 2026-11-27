@@ -8,6 +8,12 @@ import {cloudWrite} from '../utils/driveCloud';
 const key = String(import.meta.env.VITE_WAYBOOK_VAPID_PUBLIC_KEY || '').trim();
 const DEVICE_KEY = 'waybook_push_device_v48';
 const SETUP_KEY = 'waybook_first_setup_v49';
+const HANDOFF_KEY = 'waybook_install_handoff_v491';
+const INTENT_KEY = 'waybook_push_intent_v491';
+const RECOVERY_KEY = 'waybook_push_recovered_endpoint_v491';
+function readLocal(k:string){try{return localStorage.getItem(k);}catch{return null;}}
+function writeLocal(k:string,v:string){try{localStorage.setItem(k,v);}catch{/* Storage restricted */}}
+function clearLocal(k:string){try{localStorage.removeItem(k);}catch{/* Storage restricted */}}
 type SetupStep = 'welcome'|'install'|'notify'|'done';
 function setupFinished(){try{return localStorage.getItem(SETUP_KEY)==='done';}catch{return false;}}
 function rememberSetup(){try{localStorage.setItem(SETUP_KEY,'done');}catch{/* Storage may be restricted. */}}
@@ -48,6 +54,13 @@ export function PushSettings({adminToken}:{adminToken:string}) {
   const [statusUncertain,setStatusUncertain]=useState(false);
   const [installBusy,setInstallBusy]=useState(false);
   const [installMessage,setInstallMessage]=useState('');
+  const [handoff,setHandoff]=useState(()=>readLocal(HANDOFF_KEY)==='yes');
+  const [showInstallHelp,setShowInstallHelp]=useState(false);
+  const [health,setHealth]=useState<'checking'|'valid'|'repair'|'uncertain'|'off'>('checking');
+  const busyRef=useRef(false);
+  const healthEpoch=useRef(0);
+  const refreshHealth=useRef<()=>void>(()=>{});
+  const lastHealth=useRef(0);
   const autoHandled=useRef(false);
   const openedFromNotice=useRef(new URL(location.href).searchParams.has('wbUpdate'));
   const {isInstallable,isInstalled,isIOS:ios,install}=usePWAInstall();
@@ -65,69 +78,92 @@ export function PushSettings({adminToken}:{adminToken:string}) {
   const supported=isSupported();
   const standalone=window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & {standalone?:boolean}).standalone===true;
   useEffect(()=>{
-    if(!supported || !key || (ios&&!standalone))return;
-    let alive=true;let request=0;
-    const load=async()=>{
-      const attempt=++request;
+    if(!supported || !key || (mobile&&!standalone))return;
+    let alive=true;let running=false;let queued=false;
+    const load=async(force=false)=>{
+      if(!alive||busyRef.current)return;
+      if(running){if(force)queued=true;return;}
+      if(!force&&Date.now()-lastHealth.current<15000)return;
+      running=true;lastHealth.current=Date.now();
+      const epoch=++healthEpoch.current;
+      const currentAttempt=()=>alive&&epoch===healthEpoch.current&&!busyRef.current;
+      setPermission(Notification.permission);setHealth('checking');
       try{
         const registration=await deadline(navigator.serviceWorker.ready,12000,'App 服務啟用逾時');
-        if(!alive||attempt!==request)return;
+        if(!currentAttempt())return;
         const compatible=await workerSupportsPush(registration.active);
-        if(!alive||attempt!==request)return;
-        if(!compatible){setReady(false);setMessage('請先完成新版 App 更新，或關閉所有 Waybook 視窗再重開。');return;}
+        if(!currentAttempt())return;
+        if(!compatible){setReady(false);setEnabled(false);setHealth('uncertain');setMessage('請先完成新版 App 更新，或關閉所有 Waybook 視窗再重開。');return;}
         reg.current=registration;
         const current=await deadline(registration.pushManager.getSubscription(),8000,'讀取本機推播訂閱逾時');
-        if(!alive||attempt!==request)return;
-        sub.current=current;
-        let registered=false;let uncertain=false;
-        if(current){
-          try{const status=await familyRead<{registered:boolean}>({action:'pushStatus',deviceId:deviceId(),endpoint:current.endpoint});registered=Boolean(status.registered && Notification.permission==='granted');}
-          catch{uncertain=true;if(alive&&attempt===request)setMessage('無法確認雲端訂閱；可按啟用通知重新登錄。');}
+        if(!currentAttempt())return;
+        sub.current=current;setReady(true);setStatusUncertain(false);
+        let intent=readLocal(INTENT_KEY);
+        // Existing subscriptions from V4.9 indicate prior opt-in, unless explicitly disabled.
+        if(!intent&&current){writeLocal(INTENT_KEY,'on');intent='on';}
+        if(intent==='off'){setEnabled(false);setHealth('off');return;}
+        if(Notification.permission!=='granted'||!current){setEnabled(false);setHealth(intent==='on'?'repair':'off');return;}
+        const status=await familyRead<{registered:boolean}>({action:'pushStatus',deviceId:deviceId(),endpoint:current.endpoint});
+        if(!currentAttempt())return;
+        let registered=status.registered===true;
+        if(!registered&&intent==='on'&&readLocal(RECOVERY_KEY)!==current.endpoint){
+          // Restore missing cloud registration only. Never silently prompt or create a new browser subscription.
+          const result=await familyRead<{registered:boolean}>({action:'pushRegister',deviceId:deviceId(),subscription:JSON.stringify(current.toJSON())},25000);
+          if(!currentAttempt())return;
+          registered=result.registered===true;
+          if(registered){writeLocal(RECOVERY_KEY,current.endpoint);setMessage('已重新登錄此裝置。實際送達仍需測試確認。');}
         }
-        if(alive&&attempt===request){setEnabled(registered);setStatusUncertain(uncertain);setReady(true);}
-      }catch{if(alive&&attempt===request)setMessage('無法確認通知設定：'+(e instanceof Error?e.message:'請稍後重試')); }
-      finally{if(alive&&attempt===request)setChecked(true);}
+        if(!registered)setMessage('此訂閱未登錄或已失效，請按「修復推播訂閱」後重新啟用。');
+        setEnabled(registered);setStatusUncertain(false);setHealth(registered?'valid':'repair');
+      }catch(e){if(currentAttempt()){setEnabled(false);setStatusUncertain(true);setHealth('uncertain');setMessage('無法確認通知設定：'+(e instanceof Error?e.message:'請稍後重試'));}}
+      finally{running=false;if(currentAttempt())setChecked(true);if(queued&&alive){queued=false;void load(true);}}
     };
-    void load();
-    const resume=()=>{if(!document.hidden){setPermission(Notification.permission);if(!reg.current)void load();}};
-    navigator.serviceWorker.addEventListener('controllerchange',load);
+    refreshHealth.current=()=>void load(true);
+    void load(true);
+    const resume=()=>{if(!document.hidden){setPermission(Notification.permission);void load();}};
+    const controller=()=>void load(true);
+    navigator.serviceWorker.addEventListener('controllerchange',controller);
     document.addEventListener('visibilitychange',resume);
-    return()=>{alive=false;navigator.serviceWorker.removeEventListener('controllerchange',load);document.removeEventListener('visibilitychange',resume);};
-  },[supported,ios,standalone]);
+    window.addEventListener('focus',resume);
+    window.addEventListener('pageshow',resume);
+    return()=>{alive=false;refreshHealth.current=()=>{};navigator.serviceWorker.removeEventListener('controllerchange',controller);document.removeEventListener('visibilitychange',resume);window.removeEventListener('focus',resume);window.removeEventListener('pageshow',resume);};
+  },[supported,mobile,standalone]);
   useEffect(()=>{
     if(autoHandled.current||!mobile)return;
     if(setupFinished()||openedFromNotice.current){autoHandled.current=true;return;}
     // Existing subscribed installations are not interrupted. Wait for a real cloud status check.
-    if((isInstalled||standalone)&&supported&&key&&!checked)return;
+    if(standalone&&supported&&key&&!checked)return;
     autoHandled.current=true;
-    if((isInstalled||standalone)&&enabled){rememberSetup();return;}
+    if(standalone&&enabled){if(handoff){setSetup('done');return;}rememberSetup();clearLocal(HANDOFF_KEY);return;}
     // If cloud status could not be verified for an existing subscription, leave it alone.
-    if((isInstalled||standalone)&&sub.current&&(!ready||statusUncertain))return;
-    setSetup(isInstalled||standalone?'notify':'welcome');
-  },[mobile,isInstalled,standalone,supported,checked,enabled,ready,statusUncertain]);
+    if(standalone&&sub.current&&(!ready||statusUncertain))return;
+    setSetup(standalone?'notify':handoff||isInstalled?'install':'welcome');
+  },[mobile,isInstalled,standalone,supported,checked,enabled,ready,statusUncertain,handoff]);
   useEffect(()=>{
-    if(setup==='install'&&(isInstalled||standalone))setSetup(enabled?'done':'notify');
+    if(setup==='install'&&standalone)setSetup(enabled?'done':'notify');
     if(setup==='notify'&&enabled)setSetup('done');
+    if(setup==='install'&&isInstalled&&!standalone){setHandoff(true);writeLocal(HANDOFF_KEY,'yes');}
   },[setup,isInstalled,standalone,enabled]);
   useEffect(()=>{
     if(!setup)return;
     const previous=document.body.style.overflow;document.body.style.overflow='hidden';
     return()=>{document.body.style.overflow=previous;};
   },[setup]);
-  const finishSetup=()=>{autoHandled.current=true;rememberSetup();setSetup(null);};
-  const reopenSetup=()=>{autoHandled.current=true;setOpen(false);setInstallMessage('');setSetup(isInstalled||standalone?(enabled?'done':'notify'):'welcome');};
+  const finishSetup=()=>{autoHandled.current=true;rememberSetup();clearLocal(HANDOFF_KEY);setSetup(null);};
+  const skipNotifications=()=>{if(!enabled&&readLocal(INTENT_KEY)!=='on')writeLocal(INTENT_KEY,'off');setSetup('done');};
+  const reopenSetup=()=>{autoHandled.current=true;setOpen(false);setInstallMessage('');setShowInstallHelp(false);setSetup(standalone?(enabled?'done':'notify'):handoff||isInstalled?'install':'welcome');};
   const startInstall=async()=>{
     if(installBusy)return;
     setInstallBusy(true);setInstallMessage('');
-    try{if(!await install())setInstallMessage('若未出現安裝視窗，請使用瀏覽器選單加入主畫面。');}
+    try{if(await install()){setShowInstallHelp(false);setHandoff(true);writeLocal(HANDOFF_KEY,'yes');}else setInstallMessage('若未出現安裝視窗，請使用瀏覽器選單加入主畫面。');}
     finally{setInstallBusy(false);}
   };
   const enable=async()=>{
     const registration=reg.current;
-    if(!registration || busy)return;
+    if(!registration || busyRef.current || (mobile&&!standalone))return;
     setPermission(Notification.permission);
     if(isDenied()){setMessage('瀏覽器通知權限已被封鎖，請至網站及手機通知設定開啟。');return;}
-    setBusy(true);setMessage('');setStage('');
+    busyRef.current=true;++healthEpoch.current;setBusy(true);setMessage('');setStage('');
     let phase='通知權限';
     try{
       if(Notification.permission!=='granted'){
@@ -159,24 +195,37 @@ export function PushSettings({adminToken}:{adminToken:string}) {
       const id=deviceId();
       const result=await familyRead<{registered:boolean}>({action:'pushRegister',deviceId:id,subscription:JSON.stringify(current.toJSON())},25000);
       if(result?.registered!==true)throw Error('伺服器未確認裝置登錄');
-      setEnabled(true);setMessage('此裝置已啟用旅程通知。');
+      writeLocal(INTENT_KEY,'on');clearLocal(RECOVERY_KEY);setStatusUncertain(false);setHealth('valid');setEnabled(true);setMessage('此裝置已啟用旅程通知。');
     }catch(e){
-      setEnabled(false);
+      setEnabled(false);setHealth('repair');
       const detail=e instanceof Error?(e.name==='Error'?e.message:e.name+'：'+e.message):'未知錯誤';
       setMessage(phase+'失敗：'+(isDenied()?'通知已被封鎖，請至系統及網站設定開啟。':detail));
-    }finally{setPermission(Notification.permission);setStage('');setBusy(false);}
+    }finally{busyRef.current=false;setPermission(Notification.permission);setStage('');setBusy(false);}
   };
   const disable=async()=>{
-    if(!reg.current || busy)return;
-    setBusy(true);setMessage('');
+    if(!reg.current || busyRef.current)return;
+    busyRef.current=true;++healthEpoch.current;writeLocal(INTENT_KEY,'off');clearLocal(RECOVERY_KEY);setBusy(true);setMessage('');
     try{
       const current=await reg.current.pushManager.getSubscription();
       if(current){await current.unsubscribe();if(await reg.current.pushManager.getSubscription())throw Error('無法取消瀏覽器推播訂閱');}
-      sub.current=null;setEnabled(false);rememberSetup();
+      sub.current=null;setEnabled(false);setHealth('off');rememberSetup();
       try{await familyRead({action:'pushRemove',deviceId:deviceId()});setMessage('此裝置已停止接收通知。');}
       catch{setMessage('本機已停止通知；雲端記錄將於下次傳送失敗時清除。');}
     }catch(e){setMessage(e instanceof Error?e.message:'無法關閉通知');}
-    finally{setBusy(false);}
+    finally{busyRef.current=false;setBusy(false);}
+  };
+  const repair=async()=>{
+    if(!reg.current||busyRef.current)return;
+    busyRef.current=true;++healthEpoch.current;setBusy(true);setMessage('');
+    try{
+      // A separate next tap preserves user activation for a fresh subscribe.
+      const current=await reg.current.pushManager.getSubscription();
+      if(current){await current.unsubscribe();if(await reg.current.pushManager.getSubscription())throw Error('無法移除舊訂閱');}
+      sub.current=null;clearLocal(RECOVERY_KEY);setEnabled(false);setHealth('repair');
+      try{await familyRead({action:'pushRemove',deviceId:deviceId()});}catch{/* Old endpoint cleanup is also handled by sender. */}
+      setMessage('舊訂閱已移除。請按「啟用通知」完成重新登錄。');
+    }catch(e){setMessage(e instanceof Error?e.message:'修復失敗');}
+    finally{busyRef.current=false;setBusy(false);}
   };
   const test=async()=>{
     if(!adminToken||busy)return;
@@ -186,17 +235,20 @@ export function PushSettings({adminToken}:{adminToken:string}) {
     finally{setBusy(false);}
   };
   return <div className="relative shrink-0">
-    <button type="button" aria-label="通知設定" aria-expanded={open} onClick={()=>{if(supported)setPermission(Notification.permission);setOpen(v=>!v);}} className="min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center bg-[#F4F2ED] ring-1 ring-black/10 text-[#5E5A52]">{enabled?<BellRing className="w-4 h-4 text-[#1F3FB0]"/>:<Bell className="w-4 h-4"/>}</button>
+    <button type="button" aria-label="通知設定" aria-expanded={open} onClick={()=>{if(supported)setPermission(Notification.permission);if(!open)refreshHealth.current();setOpen(v=>!v);}} className="min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center bg-[#F4F2ED] ring-1 ring-black/10 text-[#5E5A52]">{enabled&&health==='valid'?<BellRing className="w-4 h-4 text-[#1F3FB0]"/>:<Bell className="w-4 h-4"/>}</button>
     {open&&<><div className="fixed inset-0 z-[59] bg-black/25" onClick={()=>setOpen(false)}/><div role="dialog" aria-label="通知設定" className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] w-[min(320px,88vw)] rounded-2xl bg-[#F4F2ED] p-4 shadow-lg ring-1 ring-black/10 text-left space-y-2">
       <div className="flex items-center justify-between"><b className="text-sm">通知設定</b><button type="button" aria-label="關閉通知設定" onClick={()=>setOpen(false)} className="p-2 text-xs">✕</button></div>
-      <p className="text-[10px] text-[#5E5A52]">Waybook V4.9{import.meta.env.VITE_WAYBOOK_BUILD_ID?` · ${String(import.meta.env.VITE_WAYBOOK_BUILD_ID).slice(0,7)}`:' · local'}</p>
+      <p className="text-[10px] text-[#5E5A52]">Waybook V4.9.1{import.meta.env.VITE_WAYBOOK_BUILD_ID?` · ${String(import.meta.env.VITE_WAYBOOK_BUILD_ID).slice(0,7)}`:' · local'}</p>
       <p className="text-xs text-[#5E5A52]">此裝置接收行程、回憶及 App 更新通知。App 鎖定時仍可收到不含私人內容的通知。</p>
-      {!key?<p className="text-xs">推播尚未設定。</p>:ios&&!standalone?<p className="text-xs">iPhone 請先加入主畫面，再從 App 圖示開啟（iOS 16.4 以上）。</p>:!supported?<p className="text-xs">此瀏覽器不支援 Web Push。</p>:!ready?<p className="text-xs">正在等待 App 服務啟用，請稍後重開。</p>:<>
-        <p className="text-xs font-medium">{enabled?'已啟用通知':'尚未啟用通知'}</p>
+      {!key?<p className="text-xs">推播尚未設定。</p>:mobile&&!standalone?<p className="text-xs">請先加入主畫面，再從 App 圖示開啟。{ios?'（iOS 16.4 以上）':''}</p>:!supported?<p className="text-xs">此瀏覽器不支援 Web Push。</p>:!ready?<><p className="text-xs">正在等待 App 服務啟用，請稍後重開。</p><button type="button" onClick={()=>refreshHealth.current()} className="text-xs underline">重新確認通知服務</button></>:<>
+        <p className="text-xs font-medium">{health==='checking'?'正在確認通知狀態…':health==='uncertain'?'通知狀態尚未確認':enabled?'已啟用通知':health==='repair'?'通知需要重新設定':'尚未啟用通知'}</p>
         <p className="text-xs text-[#5E5A52]">瀏覽器通知權限：{permission==='granted'?'已允許':permission==='denied'?'已封鎖':'尚未授權'}</p>
         {stage&&<p role="status" className="text-xs text-[#1F3FB0]">{stage}</p>}
-        <button type="button" disabled={busy} onClick={()=>void (enabled?disable():enable())} className="w-full min-h-10 rounded-xl bg-[#1F3FB0] text-white text-xs disabled:opacity-50">{busy?'處理中…':enabled?'關閉通知':'啟用通知'}</button>
-        {!enabled&&sub.current&&<button type="button" disabled={busy} onClick={()=>void disable()} className="text-xs underline">移除此裝置訂閱</button>}
+        <button type="button" disabled={busy||health==='checking'} onClick={()=>void (enabled?disable():enable())} className="w-full min-h-10 rounded-xl bg-[#1F3FB0] text-white text-xs disabled:opacity-50">{busy?'處理中…':enabled?'關閉通知':'啟用通知'}</button>
+        {permission==='denied'&&<p className="text-xs">{ios?'請到 iPhone 設定 → 通知 → 台灣2026（若有顯示），開啟允許通知。':'請在 Chrome 網站設定中允許 woeichia.github.io 的通知，並確認手機允許 Chrome 通知。'} 返回後重新確認。</p>}
+        <button type="button" disabled={busy||health==='checking'} onClick={()=>refreshHealth.current()} className="w-full min-h-10 rounded-xl bg-white ring-1 ring-black/10 text-[#1F3FB0] text-xs">重新確認通知狀態</button>
+        {sub.current&&<button type="button" disabled={busy||health==='checking'} onClick={()=>void repair()} className="w-full min-h-10 rounded-xl bg-white ring-1 ring-black/10 text-[#1F3FB0] text-xs">修復推播訂閱</button>}
+        {!enabled&&sub.current&&<button type="button" disabled={busy||health==='checking'} onClick={()=>void disable()} className="text-xs underline">移除此裝置訂閱</button>}
       </>}
       {mobile&&<button type="button" onClick={reopenSetup} className="w-full min-h-10 rounded-xl bg-white ring-1 ring-black/10 text-[#1F3FB0] text-xs">重新開啟初次設定</button>}
       {adminToken&&<button type="button" disabled={busy} onClick={()=>void test()} className="w-full min-h-10 rounded-xl bg-white ring-1 ring-black/10 text-[#1F3FB0] text-xs disabled:opacity-50">發送測試通知（所有訂閱裝置）</button>}
@@ -210,13 +262,13 @@ export function PushSettings({adminToken}:{adminToken:string}) {
           <Smartphone size={44} className="mx-auto text-[#1F3FB0]"/>
           <h2 className="text-center text-xl font-semibold">歡迎來到台灣2026</h2>
           <p className="text-center text-sm text-[#5E5A52]">一起探索台灣，分享旅程，記錄美好回憶。只需幾個簡單步驟，即可加入主畫面及開啟通知。</p>
-          <button type="button" onClick={()=>setSetup(isInstalled||standalone?'notify':'install')} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold">開始設定</button>
+          <button type="button" onClick={()=>setSetup(standalone?'notify':'install')} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold">開始設定</button>
         </>}
         {setup==='install'&&<>
           <Smartphone size={44} className="mx-auto text-[#1F3FB0]"/>
-          <h2 className="text-center text-xl font-semibold">加入手機主畫面</h2>
+          <h2 className="text-center text-xl font-semibold">{(handoff||isInstalled)&&!showInstallHelp?'從主畫面開啟 App':'加入手機主畫面'}</h2>
           <p className="text-center text-sm text-[#5E5A52]">像一般 App 一樣，隨時開啟旅遊行程。</p>
-          {ios?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm">
+          {(handoff||isInstalled)&&!showInstallHelp?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm"><p>請回到手機主畫面，點擊「台灣2026」圖示開啟 App。</p><p>開啟後會自動繼續通知設定。若圖示尚未出現，請確認安裝已完成。</p><button type="button" onClick={()=>{setShowInstallHelp(true);setInstallMessage('');}} className="text-xs underline">找不到 App 圖示？</button></div>:ios?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm">
             <p>請使用 Safari 開啟此網頁。</p>
             <p className="flex items-center gap-2"><Share size={18} className="shrink-0 text-[#1F3FB0]"/>1. 點擊瀏覽器的分享按鈕。</p>
             <p className="flex items-center gap-2"><PlusSquare size={18} className="shrink-0 text-[#1F3FB0]"/>2. 選擇「加入主畫面」，若有「以 Web App 開啟」請開啟，再按「新增」。</p>
@@ -232,9 +284,9 @@ export function PushSettings({adminToken}:{adminToken:string}) {
           <BellRing size={44} className="mx-auto text-[#1F3FB0]"/>
           <h2 className="text-center text-xl font-semibold">開啟旅程通知</h2>
           <p className="text-center text-sm text-[#5E5A52]">接收最新行程、旅遊照片、影片及 App 更新。</p>
-          {!key?<p className="text-sm">推播尚未設定。</p>:ios&&!standalone?<p className="text-sm">請先從 iPhone 主畫面開啟 App（iOS 16.4 以上）。</p>:!supported?<p className="text-sm">此瀏覽器不支援通知。仍可查看旅程。</p>:!ready?<p role="status" className="text-sm">{checked?'無法確認通知服務，請稍後從通知設定重試。':'正在準備通知服務…'}</p>:<>
+          {!key?<p className="text-sm">推播尚未設定。</p>:mobile&&!standalone?<p className="text-sm">請先從手機主畫面開啟 App。</p>:!supported?<p className="text-sm">此瀏覽器不支援通知。仍可查看旅程。</p>:!ready?<><p role="status" className="text-sm">{checked?'無法確認通知服務，請重試。':'正在準備通知服務…'}</p>{checked&&<button type="button" onClick={()=>refreshHealth.current()} className="text-sm underline">重新確認通知服務</button>}</>:<>
             <p className="text-xs text-[#5E5A52]">通知權限：{permission==='granted'?'已允許':permission==='denied'?'已封鎖':'尚未授權'}</p>
-            {permission==='denied'?<p className="text-sm">通知已被拒絕。您仍可查看旅程，稍後可從通知設定重新處理。</p>:<button type="button" disabled={busy} onClick={()=>void enable()} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold disabled:opacity-50">{busy?'處理中…':permission==='granted'?'完成通知設定':'允許通知'}</button>}
+            {permission==='denied'?<div className="space-y-2 text-sm"><p>通知已被封鎖。{ios?'請到 iPhone 設定 → 通知 → 台灣2026（若有顯示），開啟允許通知。':'請在 Chrome 網站設定 → 通知中允許此網站，並確認手機允許 Chrome 通知。'} 返回 App 後按下方按鈕。</p><button type="button" onClick={()=>refreshHealth.current()} className="w-full min-h-11 rounded-2xl bg-white ring-1 ring-black/10 text-[#1F3FB0]">重新確認通知權限</button></div>:<button type="button" disabled={busy||health==='checking'} onClick={()=>void enable()} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold disabled:opacity-50">{busy?'處理中…':permission==='granted'?'完成通知設定':'允許通知'}</button>}
           </>}
           {stage&&<p role="status" className="text-xs text-[#1F3FB0]">{stage}</p>}
           {message&&<p role="status" className="text-xs break-words text-[#5E5A52]">{message}</p>}
@@ -242,10 +294,10 @@ export function PushSettings({adminToken}:{adminToken:string}) {
         {setup==='done'&&<>
           <CheckCircle size={48} className="mx-auto text-[#35704C]"/>
           <h2 className="text-center text-xl font-semibold">準備就緒！</h2>
-          <div className="rounded-2xl bg-white/70 p-4 space-y-2 text-sm"><p>{isInstalled||standalone?'✓ App 已安裝':'可使用瀏覽器查看旅程'}</p><p>{enabled?'✓ 通知權限已開啟，推播裝置已註冊':'通知尚未啟用'}</p></div>
+          <div className="rounded-2xl bg-white/70 p-4 space-y-2 text-sm"><p>{standalone?'✓ App 已安裝':'可使用瀏覽器查看旅程'}</p><p>{enabled?'✓ 通知權限已開啟，推播裝置已註冊':'通知尚未啟用'}</p></div>
           <button type="button" onClick={finishSetup} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold">開始我的旅程</button>
         </>}
-        {setup!=='done'&&<button type="button" disabled={busy||installBusy} onClick={finishSetup} className="w-full min-h-10 text-sm text-[#5E5A52] disabled:opacity-50">{setup==='notify'?'稍後開啟通知':'稍後設定，先查看旅程'}</button>}
+        {setup!=='done'&&<button type="button" disabled={busy||installBusy||(setup==='notify'&&health==='checking'&&supported&&!!key&&!checked)} onClick={()=>setup==='notify'?skipNotifications():setup==='install'&&(handoff||isInstalled)?setSetup(null):setSetup('done')} className="w-full min-h-10 text-sm text-[#5E5A52] disabled:opacity-50">{setup==='notify'?'稍後開啟通知':'稍後設定，先查看旅程'}</button>}
       </section>
     </div>,document.body)}
   </div>;
