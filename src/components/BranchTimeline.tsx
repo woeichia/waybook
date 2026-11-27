@@ -4,6 +4,7 @@ import { ArrowUpRight, Navigation } from 'lucide-react';
 import type { ItineraryDay, ItineraryStop } from '../types/itinerary';
 import { slots, inactive, routeMinutes, routeInstructions, routeModes, routeVisible, previewDay, travelSummary, type RoutePreview } from '../utils/branchRoutes';
 import { TransportDisclosure } from './TransportDisclosure';
+import { DayRouteStroke, DayRouteRail, routeBandPaths, DAY_ROUTE_ANCHOR } from './DayRouteStroke';
 import { StopCard } from './StopCard';
 import { CategoryBadge } from './CategoryBadge';
 import { buildStopMapsUrl, buildFullDayMapsUrl } from '../utils/itinerary';
@@ -16,7 +17,7 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
  const confirm=(ids:[string,string],id:string|null)=>{setInteracted(true);onConfirm?.(ids,id);};
  const layoutTransition={duration:reduced?0:.32,ease:[.22,.75,.25,1] as [number,number,number,number]};
  const root=useRef<HTMLDivElement>(null), [width,setWidth]=useState(0);
- useLayoutEffect(()=>{const el=root.current;if(!el)return;const measure=()=>setWidth(el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect();},[]);
+ useLayoutEffect(()=>{const el=root.current;if(!el)return;const measure=()=>setWidth(route?el.getBoundingClientRect().width:el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return()=>observer.disconnect();},[]);
  const maskPrefix=useId().replace(/[^a-zA-Z0-9_-]/g,'');
  // Cut connector strokes out of the translucent transport strips, without changing geometry.
  useLayoutEffect(()=>{
@@ -42,9 +43,8 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
   return()=>observer.disconnect();
  });
  const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
- // Use the same CSS rail for every straight Day Route segment, avoiding SVG/CSS seams.
- const straightRail=(delay:number,duration:number,top=0)=><motion.div aria-hidden="true" className="absolute pointer-events-none" style={{left:13.25,width:1.5,top,bottom:0,background:'#1F3FB0',transformOrigin:'top center'}} initial={animated?{scaleY:0}:false} animate={{scaleY:1}} transition={{duration:animated?duration:0,delay:animated?delay:0,ease:'linear'}}/>;
- const center=(count:number,index:number)=>count===1?(route?14:width/2):index===0?(width-8)/4:(3*width+8)/4;
+ const straightRail=(delay:number,duration:number,top=0)=><DayRouteRail top={top} animated={animated} delay={delay} duration={duration}/>;
+ const center=(count:number,index:number)=>count===1?(route?DAY_ROUTE_ANCHOR:width/2):index===0?(width-8)/4:(3*width+8)/4;
  function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
   const linear=row.length===1&&next.length===1, junction=width/2;
   const from=row.filter(s=>!inactive(effective,s.id));
@@ -77,20 +77,8 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    const lanes=linear?[14]:shared?[junction]:next.length===2?target:source;
    const topHeight=row.length===2&&lanes.length===2&&next.length===2?48:26;
    const bottomHeight=26;
-   const bend=(a:number,b:number,y:number,h:number)=>{
-    if(Math.abs(a-b)<.5)return `M${a} ${y} V${y+h}`;
-    const r=Math.min(7,Math.abs(a-b)/2,h/4),mid=y+h/2,dir=Math.sign(b-a);
-    return `M${a} ${y} V${mid-r} Q${a} ${mid} ${a+dir*r} ${mid} H${b-dir*r} Q${b} ${mid} ${b} ${mid+r} V${y+h}`;
-   };
-   const bandPaths=(a:number[],b:number[],h:number,neutral=false)=>{
-    if(!neutral&&a.length===b.length&&a.every((x,j)=>Math.abs(x-b[j])<.5))return a.map(x=>bend(x,x,0,h));
-    if(a.length===1&&b.length===1)return [bend(a[0],b[0],0,h)];
-    if(a.length===1)return b.map(x=>bend(a[0],x,0,h));
-    if(b.length===1)return a.map(x=>bend(x,b[0],0,h));
-    // For a 2→2 connection use a neutral junction; never imply matched pairs.
-    return [...a.map(x=>bend(x,junction,0,h/2)),...b.map(x=>bend(junction,x,h/2,h/2))];
-   };
-   const band=(paths:string[],height:number,phase:number)=><svg viewBox={`0 0 ${Math.max(width,1)} ${height}`} preserveAspectRatio="none" className="block w-full shrink-0 overflow-visible pointer-events-none" style={{height}} aria-hidden="true">{width>0&&paths.map((d,k)=><motion.path key={k} d={d} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?.27:0,delay:animated?i*step+.24+phase*.28:0,ease:'linear'}}/>)}</svg>;
+   const bandPaths=(a:number[],b:number[],h:number,neutral=false)=>routeBandPaths(a,b,h,junction,neutral);
+   const band=(paths:string[],height:number,phase:number)=><DayRouteStroke height={height} paths={width>0?paths:[]} animated={animated} delay={i*step+.24+phase*.28} duration={.27}/>;
    // No info: connect directly, with no unnecessary blank transport row.
    if(!showInfo)return <div>{band(bandPaths(source,target,48,row.length===2&&next.length===2),48,0)}</div>;
    return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative flex flex-col">

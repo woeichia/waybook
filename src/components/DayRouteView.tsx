@@ -1,5 +1,6 @@
 import { routeMinutes, routeInstructions, routeModes, travelSummary } from '../utils/branchRoutes';
 import React from 'react';
+import { DayRouteRail } from './DayRouteStroke';
 import { TransportDisclosure } from './TransportDisclosure';
 import { motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, MapPin, Navigation } from 'lucide-react';
@@ -56,10 +57,8 @@ export const DayRouteView: React.FC<DayRouteViewProps> = ({ day }) => {
                     className="w-7 h-7 rounded-full bg-[#1F3FB0] text-white text-xs font-semibold flex items-center justify-center shrink-0 tabular-nums z-10 shadow-xs">
                     {idx + 1}
                   </motion.div>
-                  {!isLast && <div className="w-px flex-1 bg-[#D2CEC4] my-1.5 min-h-[28px] relative overflow-hidden">
-                    <motion.div className="absolute inset-0 bg-[#1F3FB0] origin-top"
-                      initial={reducedMotion?false:{scaleY:0}} animate={{scaleY:1}}
-                      transition={{duration:reducedMotion?0:0.37,delay:reducedMotion?0:idx*0.65+0.28,ease:'linear'}} />
+                  {!isLast && <div className="w-7 flex-1 my-1.5 min-h-[28px] relative">
+                    <DayRouteRail animated={!reducedMotion} delay={idx*0.65+0.28} duration={0.37}/>
                   </div>}
                 </div>
 
