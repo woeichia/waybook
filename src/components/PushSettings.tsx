@@ -266,9 +266,9 @@ export function PushSettings({adminToken}:{adminToken:string}) {
         </>}
         {setup==='install'&&<>
           <Smartphone size={44} className="mx-auto text-[#1F3FB0]"/>
-          <h2 className="text-center text-xl font-semibold">{(handoff||isInstalled)&&!showInstallHelp?'從主畫面開啟 App':'加入手機主畫面'}</h2>
-          <p className="text-center text-sm text-[#5E5A52]">像一般 App 一樣，隨時開啟旅遊行程。</p>
-          {(handoff||isInstalled)&&!showInstallHelp?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm"><p>請回到手機主畫面，點擊「台灣2026」圖示開啟 App。</p><p>開啟後會自動繼續通知設定。若圖示尚未出現，請確認安裝已完成。</p><button type="button" onClick={()=>{setShowInstallHelp(true);setInstallMessage('');}} className="text-xs underline">找不到 App 圖示？</button></div>:ios?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm">
+          <h2 className="text-center text-xl font-semibold">{(handoff||isInstalled)&&!showInstallHelp?'安裝完成！':'加入手機主畫面'}</h2>
+          <p className="text-center text-sm text-[#5E5A52]">{(handoff||isInstalled)&&!showInstallHelp?`請先離開${ios?'Safari':'Chrome'}，再開啟「台灣2026」App。`:'像一般 App 一樣，隨時開啟旅遊行程。'}</p>
+          {(handoff||isInstalled)&&!showInstallHelp?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm"><p><b>1.</b> 先離開{ios?'Safari':'Chrome'} 瀏覽器。</p><p><b>2.</b> 回到手機桌面。</p><p><b>3.</b> 點擊「台灣2026」圖示開啟 App。</p><p><b>4.</b> 開啟後會自動繼續通知設定。若圖示尚未出現，請確認安裝已完成。</p><button type="button" onClick={()=>{setShowInstallHelp(true);setInstallMessage('');}} className="text-xs underline">找不到 App 圖示？</button></div>:ios?<div className="space-y-3 rounded-2xl bg-white/70 p-4 text-sm">
             <p>請使用 Safari 開啟此網頁。</p>
             <p className="flex items-center gap-2"><Share size={18} className="shrink-0 text-[#1F3FB0]"/>1. 點擊瀏覽器的分享按鈕。</p>
             <p className="flex items-center gap-2"><PlusSquare size={18} className="shrink-0 text-[#1F3FB0]"/>2. 選擇「加入主畫面」，若有「以 Web App 開啟」請開啟，再按「新增」。</p>
@@ -278,7 +278,7 @@ export function PushSettings({adminToken}:{adminToken:string}) {
             {isInstallable&&<button type="button" disabled={installBusy} onClick={()=>void startInstall()} className="w-full min-h-11 rounded-2xl bg-[#1F3FB0] text-white text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"><Download size={17}/>{installBusy?'等待安裝確認…':'立即安裝'}</button>}
           </>}
           {installMessage&&<p role="status" className="text-xs text-[#5E5A52]">{installMessage}</p>}
-          <p className="text-xs text-[#5E5A52]">從主畫面開啟後，App 將自動繼續通知設定。可能需要再次輸入家庭通行密碼。</p>
+          <p className="text-xs text-[#5E5A52]">開啟 App 後會自動繼續通知設定。可能需要再次輸入家庭通行密碼。</p>
         </>}
         {setup==='notify'&&<>
           <BellRing size={44} className="mx-auto text-[#1F3FB0]"/>
