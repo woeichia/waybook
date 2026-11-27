@@ -25,6 +25,13 @@ function workerSupportsPush(worker: ServiceWorker | null):Promise<boolean>{
     try{worker.postMessage({type:'WAYBOOK_PUSH_PING'},[channel.port2]);}catch{done(false);}
   });
 }
+// Bound browser promises separately from the already timed cloud POST bridge.
+function deadline<T>(promise:Promise<T>,ms:number,message:string):Promise<T>{
+  return new Promise((resolve,reject)=>{
+    const timer=window.setTimeout(()=>reject(new Error(message)),ms);
+    promise.then(value=>{window.clearTimeout(timer);resolve(value);},error=>{window.clearTimeout(timer);reject(error);});
+  });
+}
 function isDenied(){return Notification.permission==='denied';}
 function isSupported(){return window.isSecureContext && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;}
 export function PushSettings({adminToken}:{adminToken:string}) {
@@ -33,6 +40,9 @@ export function PushSettings({adminToken}:{adminToken:string}) {
   const [enabled,setEnabled]=useState(false);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
+  const [stage,setStage]=useState('');
+  const [permission,setPermission]=useState<NotificationPermission|null>(()=>'Notification' in window?Notification.permission:null);
+  const pendingSubscribe=useRef<Promise<PushSubscription>|null>(null);
   const reg=useRef<ServiceWorkerRegistration|null>(null);
   const sub=useRef<PushSubscription|null>(null);
   const supported=isSupported();
@@ -44,13 +54,13 @@ export function PushSettings({adminToken}:{adminToken:string}) {
     const load=async()=>{
       const attempt=++request;
       try{
-        const registration=await navigator.serviceWorker.ready;
+        const registration=await deadline(navigator.serviceWorker.ready,12000,'App 服務啟用逾時');
         if(!alive||attempt!==request)return;
         const compatible=await workerSupportsPush(registration.active);
         if(!alive||attempt!==request)return;
         if(!compatible){setReady(false);setMessage('請先完成新版 App 更新，或關閉所有 Waybook 視窗再重開。');return;}
         reg.current=registration;
-        const current=await registration.pushManager.getSubscription();
+        const current=await deadline(registration.pushManager.getSubscription(),8000,'讀取本機推播訂閱逾時');
         if(!alive||attempt!==request)return;
         sub.current=current;
         let registered=false;
@@ -59,24 +69,55 @@ export function PushSettings({adminToken}:{adminToken:string}) {
           catch{if(alive&&attempt===request)setMessage('無法確認雲端訂閱；可按啟用通知重新登錄。');}
         }
         if(alive&&attempt===request){setEnabled(registered);setReady(true);}
-      }catch{if(alive&&attempt===request)setMessage('無法確認通知設定，請稍後重試。');}
+      }catch{if(alive&&attempt===request)setMessage('無法確認通知設定：'+(e instanceof Error?e.message:'請稍後重試')); }
     };
     void load();
     navigator.serviceWorker.addEventListener('controllerchange',load);
     return()=>{alive=false;navigator.serviceWorker.removeEventListener('controllerchange',load);};
   },[supported,ios,standalone]);
   const enable=async()=>{
-    if(!reg.current || busy)return;
-    if(isDenied()){setMessage('通知已被封鎖，請在手機或瀏覽器設定中允許。');return;}
-    setBusy(true);setMessage('');
+    const registration=reg.current;
+    if(!registration || busy)return;
+    setPermission(Notification.permission);
+    if(isDenied()){setMessage('瀏覽器通知權限已被封鎖，請至網站及手機通知設定開啟。');return;}
+    setBusy(true);setMessage('');setStage('');
+    let phase='通知權限';
     try{
-      // Subscribe directly in the click handler, before any network await (iOS gesture requirement).
-      const current=sub.current || await reg.current.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:vapidKey()});
+      if(Notification.permission!=='granted'){
+        setStage('1/3 等待系統通知權限…');
+        // Must be called from the click, not after a network request.
+        const granted=await deadline(Notification.requestPermission(),30000,'等待系統權限逾時，請確認是否有權限視窗');
+        setPermission(granted);
+        if(granted!=='granted')throw Error(granted==='denied'?'通知已被拒絕':'尚未授予通知權限');
+        // A fresh tap preserves user activation for the PushManager call on iOS.
+        setMessage('通知權限已允許。請再按一次「啟用通知」，完成裝置訂閱。');
+        return;
+      }
+      phase='瀏覽器推播訂閱';setStage('2/3 建立瀏覽器推播訂閱…');
+      const publicKey=vapidKey();
+      // No intervening await before subscribe: preserves user activation.
+      // Retain an outstanding browser promise so a retry cannot create parallel subscriptions.
+      let current=sub.current;
+      if(!current){
+        if(!pendingSubscribe.current){
+          const task=registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:publicKey});
+          pendingSubscribe.current=task;
+          const clear=()=>{if(pendingSubscribe.current===task)pendingSubscribe.current=null;};
+          void task.then(clear,clear);
+        }
+        current=await deadline(pendingSubscribe.current!,20000,'瀏覽器推播服務在 20 秒內未回應。請確認網路、Chrome 通知權限，或關閉 Waybook 後重試。');
+      }
       sub.current=current;
-      await familyRead({action:'pushRegister',deviceId:deviceId(),subscription:JSON.stringify(current.toJSON())});
+      phase='雲端登錄';setStage('3/3 登錄 Google 雲端訂閱…');
+      const id=deviceId();
+      const result=await familyRead<{registered:boolean}>({action:'pushRegister',deviceId:id,subscription:JSON.stringify(current.toJSON())},25000);
+      if(result?.registered!==true)throw Error('伺服器未確認裝置登錄');
       setEnabled(true);setMessage('此裝置已啟用旅程通知。');
-    }catch(e){setEnabled(false);setMessage(isDenied()?'通知已被封鎖，請至系統設定開啟。':(e instanceof Error?e.message:'無法啟用通知'));}
-    finally{setBusy(false);}
+    }catch(e){
+      setEnabled(false);
+      const detail=e instanceof Error?(e.name==='Error'?e.message:e.name+'：'+e.message):'未知錯誤';
+      setMessage(phase+'失敗：'+(isDenied()?'通知已被封鎖，請至系統及網站設定開啟。':detail));
+    }finally{setPermission(Notification.permission);setStage('');setBusy(false);}
   };
   const disable=async()=>{
     if(!reg.current || busy)return;
@@ -98,12 +139,14 @@ export function PushSettings({adminToken}:{adminToken:string}) {
     finally{setBusy(false);}
   };
   return <div className="relative shrink-0">
-    <button type="button" aria-label="通知設定" aria-expanded={open} onClick={()=>setOpen(v=>!v)} className="min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center bg-[#F4F2ED] ring-1 ring-black/10 text-[#5E5A52]">{enabled?<BellRing className="w-4 h-4 text-[#1F3FB0]"/>:<Bell className="w-4 h-4"/>}</button>
+    <button type="button" aria-label="通知設定" aria-expanded={open} onClick={()=>{if(supported)setPermission(Notification.permission);setOpen(v=>!v);}} className="min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center bg-[#F4F2ED] ring-1 ring-black/10 text-[#5E5A52]">{enabled?<BellRing className="w-4 h-4 text-[#1F3FB0]"/>:<Bell className="w-4 h-4"/>}</button>
     {open&&<><div className="fixed inset-0 z-[59] bg-black/25" onClick={()=>setOpen(false)}/><div role="dialog" aria-label="通知設定" className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] w-[min(320px,88vw)] rounded-2xl bg-[#F4F2ED] p-4 shadow-lg ring-1 ring-black/10 text-left space-y-2">
       <div className="flex items-center justify-between"><b className="text-sm">通知設定</b><button type="button" aria-label="關閉通知設定" onClick={()=>setOpen(false)} className="p-2 text-xs">✕</button></div>
       <p className="text-xs text-[#5E5A52]">此裝置接收行程、回憶及 App 更新通知。App 鎖定時仍可收到不含私人內容的通知。</p>
       {!key?<p className="text-xs">推播尚未設定。</p>:ios&&!standalone?<p className="text-xs">iPhone 請先加入主畫面，再從 App 圖示開啟（iOS 16.4 以上）。</p>:!supported?<p className="text-xs">此瀏覽器不支援 Web Push。</p>:!ready?<p className="text-xs">正在等待 App 服務啟用，請稍後重開。</p>:<>
         <p className="text-xs font-medium">{enabled?'已啟用通知':'尚未啟用通知'}</p>
+        <p className="text-xs text-[#5E5A52]">瀏覽器通知權限：{permission==='granted'?'已允許':permission==='denied'?'已封鎖':'尚未授權'}</p>
+        {stage&&<p role="status" className="text-xs text-[#1F3FB0]">{stage}</p>}
         <button type="button" disabled={busy} onClick={()=>void (enabled?disable():enable())} className="w-full min-h-10 rounded-xl bg-[#1F3FB0] text-white text-xs disabled:opacity-50">{busy?'處理中…':enabled?'關閉通知':'啟用通知'}</button>
         {!enabled&&sub.current&&<button type="button" disabled={busy} onClick={()=>void disable()} className="text-xs underline">移除此裝置訂閱</button>}
       </>}
