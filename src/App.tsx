@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { WifiOff, Pencil } from 'lucide-react';
 import { playUiSound, readSoundEnabled, storeSoundEnabled, type UiSoundKind } from './utils/uiSounds';
 import { CloudPanel } from './components/CloudPanel';
+import { AppUpdateBanner } from './components/AppUpdateBanner';
 import type { RoutePlanResponse } from './utils/routePlanning';
 import { GOOGLE_CLIENT_ID, cloudRead, cloudWrite, getGoogleIdToken, loadCloudPhoto, type CloudSnapshot, hasCloudConfiguration } from './utils/driveCloud';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
@@ -89,6 +90,8 @@ export default function App() {
   const cloudConfigured = hasCloudConfiguration();
   const [cloudBusy, setCloudBusy] = useState(false);
   const [cloudStatus, setCloudStatus] = useState('');
+  const [contentNotice, setContentNotice] = useState(false);
+  const videoRevisionRef = React.useRef<string|null>(null);
   const [cloudUpdatedAt, setCloudUpdatedAt] = useState('');
   const [cloudPhotoIds, setCloudPhotoIds] = useState<Record<string, string[]>>({});
   const [cloudPhotoData, setCloudPhotoData] = useState<Record<string, string>>({});
@@ -172,6 +175,7 @@ export default function App() {
       if (!validated.ok) throw new Error(validated.error);
       // A warm cache must not be overwritten by an unchanged cloud response.
       if (!sameVersion) {
+        if (background && latestCloudVersionRef.current) setContentNotice(true);
         setItinerary(validated.data);
         setCloudPhotoIds(snapshot.galleries || {});
         setCloudMemoryRefs(memoryRefs);
@@ -260,14 +264,23 @@ export default function App() {
       if (now - lastBackgroundCheckRef.current < 15000) return;
       lastBackgroundCheckRef.current = now;
       void pullCloudRef.current(true);
+      void cloudRead<{updatedAt:string}>({action:'videoRevision'}).then(result=>{
+        const version = result?.updatedAt || '';
+        if (videoRevisionRef.current !== null && version && version !== videoRevisionRef.current) setContentNotice(true);
+        videoRevisionRef.current = version;
+      }).catch(()=>{});
     };
     const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    const onPush = (event: MessageEvent) => { if (event.data?.type === 'WAYBOOK_PUSH_OPEN') {lastBackgroundCheckRef.current=0;check();} };
+    navigator.serviceWorker?.addEventListener('message', onPush);
     window.addEventListener('focus', check);
     window.addEventListener('pageshow', check);
     window.addEventListener('online', check);
     document.addEventListener('visibilitychange', onVisible);
     const interval = window.setInterval(check, 120000);
+    if(videoRevisionRef.current===null) void cloudRead<{updatedAt:string}>({action:'videoRevision'}).then(r=>{if(videoRevisionRef.current===null)videoRevisionRef.current=r?.updatedAt||'';}).catch(()=>{});
     return () => {
+      navigator.serviceWorker?.removeEventListener('message', onPush);
       window.removeEventListener('focus', check);
       window.removeEventListener('pageshow', check);
       window.removeEventListener('online', check);
@@ -299,7 +312,7 @@ export default function App() {
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '登入失敗'); }
   };
 
-  const publishCloud = async () => {
+  const publishCloud = async (notifyFamily = false) => {
     if (!cloudConfigured || !adminToken || cloudBusy || !cloudLoaded) return;
     if (!window.confirm('發佈後家人的手機將看到這份行程和相片。確定發佈？')) return;
     setCloudBusy(true);
@@ -351,7 +364,7 @@ export default function App() {
         }
       }
       setCloudStatus('正在發佈行程及回憶…');
-      const result = await cloudWrite<{updatedAt:string}>('publish', {itinerary, galleries:remote, memoryGalleries:memoryRemote, expectedUpdatedAt:cloudUpdatedAt}, adminToken);
+      const result = await cloudWrite<{updatedAt:string;pushQueued?:boolean}>('publish', {itinerary, galleries:remote, memoryGalleries:memoryRemote, expectedUpdatedAt:cloudUpdatedAt, notifyFamily}, adminToken);
       setCloudUpdatedAt(result.updatedAt); setCloudPhotoIds(remote); setCloudMemoryRefs(memoryRemote);
       latestCloudVersionRef.current = result.updatedAt;
       unpublishedEditsRef.current = false;
@@ -374,7 +387,7 @@ export default function App() {
       // Save newly published state for the administrator's own next launch too.
       void savePublishedSnapshot({version:1, updatedAt:result.updatedAt, itinerary, galleries:remote, memoryGalleries:memoryRemote}).catch(() => {});
       for (const [id, photo] of Object.entries(nextData)) void saveCachedPhoto(id, photo).catch(() => {});
-      setCloudStatus('發佈成功！家人開啟 App 後會自動更新。');
+      setCloudStatus('發佈成功！家人開啟 App 後會自動更新。' + (notifyFamily ? (result.pushQueued ? ' 已提交推播通知。' : ' 通知未能提交，可稍後在通知設定測試。') : ''));
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '發佈失敗'); }
     finally { setCloudBusy(false); }
   };
@@ -550,7 +563,9 @@ export default function App() {
               onOpenShareImport={() => setIsShareOpen(true)}
             />
 
-            <CloudPanel connected={cloudConfigured} isAdmin={!!adminToken} status={cloudStatus} updatedAt={cloudUpdatedAt} busy={cloudBusy} onLogin={loginAdmin} onLoad={pullCloud} onPublish={publishCloud} />
+            <AppUpdateBanner blocked={!!selectedStop || isEditOpen || isShareOpen || cloudBusy || (!!adminToken && unpublishedEditsRef.current)} canUpdate={()=>!selectedStopRef.current && !isEditOpen && !isShareOpen && !cloudBusy && !unpublishedEditsRef.current}/>
+            {!isAdmin && contentNotice && <div role="status" className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-[#F4F2ED] px-3 py-2 text-xs text-[#1F3FB0]">旅程資料已有更新。<button type="button" className="px-2 py-1" onClick={()=>setContentNotice(false)}>關閉</button></div>}
+            <CloudPanel adminToken={adminToken} connected={cloudConfigured} isAdmin={!!adminToken} status={cloudStatus} updatedAt={cloudUpdatedAt} busy={cloudBusy} onLogin={loginAdmin} onLoad={pullCloud} onPublish={publishCloud} />
             <div data-sound-scope="days">
             <DaySelector
               days={itinerary.days}

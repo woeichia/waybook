@@ -1,0 +1,49 @@
+name: Waybook Web Push
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: Notification type (no private content in messages)
+        required: true
+        default: test
+        type: choice
+        options: [test, content, video, app]
+  workflow_call:
+    inputs:
+      kind:
+        required: true
+        type: string
+    secrets:
+      VAPID_PUBLIC_KEY:
+        required: false
+      VAPID_PRIVATE_KEY:
+        required: false
+      VAPID_SUBJECT:
+        required: false
+      WAYBOOK_PUSH_BRIDGE_SECRET:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated Web Push sender dependency
+        run: npm install --prefix .github/push-deps --no-save --no-package-lock --ignore-scripts --no-audit --no-fund web-push@3.6.7
+      - name: Send notification to registered devices
+        env:
+          WAYBOOK_PUSH_KIND: ${{ inputs.kind }}
+          WAYBOOK_APPS_SCRIPT_URL: ${{ vars.WAYBOOK_APPS_SCRIPT_URL }}
+          WAYBOOK_PUSH_BRIDGE_SECRET: ${{ secrets.WAYBOOK_PUSH_BRIDGE_SECRET }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+        run: node .github/scripts/send-waybook-push.cjs

@@ -31,13 +31,15 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
   const [progress,setProgress]=useState(0);
   const [error,setError]=useState('');
   const [success,setSuccess]=useState('');
+  const [notifyFamily,setNotifyFamily]=useState(false);
+  const [notice,setNotice]=useState('');
   useEffect(()=>{setPending(readPendingVideo(stopId));setSelected(null);setStep('');setProgress(0);setError('');setSuccess('');},[stopId]);
   useEffect(()=>{void warmupDriveOAuth().catch(()=>{});},[]);
   const store=(receipt:PendingVideo)=>{savePendingVideo(stopId,receipt);setPending(receipt);};
   const run=async()=>{
     if(busy||(!selected&&!pending))return;
     if(selected&&pending&&!window.confirm('這個活動已有尚未完成發布的影片。確定改用新影片？先前的 Drive 檔案不會自動刪除。'))return;
-    setBusy(true);setError('');setSuccess('');setProgress(0);
+    setBusy(true);setError('');setSuccess('');setProgress(0);setNotice('');
     let receipt=selected?null:readPendingVideo(stopId);
     let driveToken='';
     try{
@@ -78,9 +80,10 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
       if(!confirmed){
         try{
           const token=await getGoogleIdToken(GOOGLE_CLIENT_ID);
-          await cloudWrite('registerVideo',{stopId,fileId:receipt.fileId,
+          const registered = await cloudWrite<{pushQueued?:boolean}>('registerVideo',{stopId,fileId:receipt.fileId,notifyFamily,
             ...(receipt.posterId?{posterId:receipt.posterId}:{}),
             ...(receipt.width&&receipt.height?{width:receipt.width,height:receipt.height}:{})},token);
+          if(notifyFamily) setNotice(registered.pushQueued?'已提交推播通知。':'影片已發佈，但通知未能提交。');
         }catch(e){
           confirmed=await publishConfirmed(stopId,receipt.fileId);
           if(!confirmed) throw e;
@@ -101,6 +104,8 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
     <button type="button" onClick={()=>fileRef.current?.click()} disabled={busy} className="w-full min-h-11 rounded-xl bg-white ring-1 ring-black/10 px-3 text-sm text-[#1F3FB0] disabled:opacity-50">{selected?`已選：${selected.name}`:'選擇影片'}</button>
     {!selected&&pending&&<p className="text-xs text-[#465772]">偵測到先前已上傳但未完成發布的影片；可直接繼續，不必重新上傳。</p>}
     <button type="button" onClick={()=>void run()} disabled={busy||(!selected&&!pending)} className="w-full min-h-12 rounded-xl bg-[#1F3FB0] text-white text-sm font-semibold flex justify-center items-center gap-2 disabled:opacity-50">{busy?<Loader2 className="animate-spin" size={18}/>:<CloudUpload size={18}/>}{busy?'處理中…':!selected&&pending?'繼續發布':'上傳並發布'}</button>
+    <label className="flex items-center gap-2 text-xs text-[#465772]"><input type="checkbox" checked={notifyFamily} onChange={e=>setNotifyFamily(e.target.checked)} disabled={busy}/>影片發佈後通知家人（多支影片可留待整批通知）</label>
+    {notice&&<p role="status" className="text-xs text-[#465772]">{notice}</p>}
     {busy&&<div role="status" className="space-y-1"><p className="text-xs text-[#465772]">{step}</p>{progress>0&&<div className="h-1.5 bg-white rounded-full overflow-hidden"><div className="h-full bg-[#1F3FB0]" style={{width:`${progress}%`}}/></div>}</div>}
     {success&&<p role="status" className="text-xs text-green-800 flex gap-1"><CheckCircle2 size={15}/>{success}</p>}
     {error&&<p role="alert" className="text-xs text-red-700">{error}</p>}

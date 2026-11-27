@@ -11,7 +11,7 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
+        registerType: 'prompt',
         injectRegister: 'inline',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
@@ -46,6 +46,9 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          importScripts: ['waybook-push-sw.js'],
+          skipWaiting: false,
+          clientsClaim: true,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff,woff2}'],
           navigateFallbackDenylist: [/^\/api/],
           runtimeCaching: [

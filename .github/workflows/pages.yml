@@ -25,9 +25,12 @@ jobs:
         env:
           VITE_WAYBOOK_APPS_SCRIPT_URL: ${{ vars.WAYBOOK_APPS_SCRIPT_URL }}
           VITE_WAYBOOK_GOOGLE_CLIENT_ID: ${{ vars.WAYBOOK_GOOGLE_CLIENT_ID }}
+          VITE_WAYBOOK_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VITE_WAYBOOK_BUILD_ID: ${{ github.sha }}
         run: |
           export VITE_BASE_PATH="/${{ github.event.repository.name }}/"
           bun run build
+          printf '{"build":"%s"}\n' "$VITE_WAYBOOK_BUILD_ID" > dist/waybook-version.json
       - uses: actions/configure-pages@v5
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -46,3 +49,15 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  notify-deploy:
+    needs: deploy
+    if: ${{ needs.deploy.result == 'success' }}
+    uses: ./.github/workflows/waybook-push.yml
+    with:
+      kind: app
+    secrets:
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+      WAYBOOK_PUSH_BRIDGE_SECRET: ${{ secrets.WAYBOOK_PUSH_BRIDGE_SECRET }}
