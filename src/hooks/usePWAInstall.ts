@@ -1,60 +1,40 @@
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
-
+// Capture the one-shot install event even while the family passcode gate is open.
+// The header and onboarding share the same event, never prompt twice.
+let deferredPrompt: BeforeInstallPromptEvent | null = null;
+const mode = window.matchMedia('(display-mode: standalone)');
+const standalone = () => mode.matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+let installed = standalone();
+let revision = 0;
+const listeners = new Set<() => void>();
+const emit = () => { revision++; listeners.forEach(fn => fn()); };
+const subscribe = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e as BeforeInstallPromptEvent; emit();
+});
+window.addEventListener('appinstalled', () => { installed = true; deferredPrompt = null; emit(); });
+const refresh = () => { if (standalone() && !installed) { installed = true; deferredPrompt = null; emit(); } };
+mode.addEventListener?.('change', refresh);
+window.addEventListener('pageshow', refresh);
+window.addEventListener('focus', refresh);
+const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+async function install() {
+  const prompt = deferredPrompt;
+  if (!prompt) return false;
+  deferredPrompt = null; emit();
+  try {
+    await prompt.prompt();
+    const result = await prompt.userChoice;
+    if (result.outcome === 'accepted') { installed = true; emit(); return true; }
+  } catch { /* Browser may withdraw the one-shot prompt. Offer manual install instead. */ }
+  return false;
+}
 export function usePWAInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
-
-  useEffect(() => {
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    setIsInstalled(isStandalone);
-
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIOSDevice);
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    const handleAppInstalled = () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', handleAppInstalled);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-      window.removeEventListener('appinstalled', handleAppInstalled);
-    };
-  }, []);
-
-  const install = async () => {
-    if (!deferredPrompt) return false;
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      return true;
-    }
-    return false;
-  };
-
-  return {
-    isInstallable: !!deferredPrompt,
-    isInstalled,
-    isIOS,
-    install,
-  };
+  useSyncExternalStore(subscribe, () => revision);
+  return { isInstallable: !!deferredPrompt, isInstalled: installed, isIOS: ios, install };
 }
