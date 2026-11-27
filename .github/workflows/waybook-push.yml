@@ -9,6 +9,14 @@ on:
         default: test
         type: choice
         options: [test, content, video, app]
+      update_id:
+        description: Optional opaque update identifier
+        required: false
+        type: string
+      change_type:
+        description: Optional update category
+        required: false
+        type: string
   workflow_call:
     inputs:
       kind:
@@ -41,6 +49,8 @@ jobs:
       - name: Send notification to registered devices
         env:
           WAYBOOK_PUSH_KIND: ${{ inputs.kind }}
+          WAYBOOK_PUSH_UPDATE_ID: ${{ github.event.inputs.update_id || '' }}
+          WAYBOOK_PUSH_CHANGE_TYPE: ${{ github.event.inputs.change_type || '' }}
           WAYBOOK_APPS_SCRIPT_URL: ${{ vars.WAYBOOK_APPS_SCRIPT_URL }}
           WAYBOOK_PUSH_BRIDGE_SECRET: ${{ secrets.WAYBOOK_PUSH_BRIDGE_SECRET }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}

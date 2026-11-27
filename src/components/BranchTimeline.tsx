@@ -121,7 +121,7 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
  {group&&<div className="text-center text-xs py-2 text-[#5E5A52] space-y-1">{confirmed?<><p>{group.selectedEventId===stop.id?'✓ 已前往':'未前往'}</p>{!route&&onConfirm&&group.selectedEventId===stop.id&&<button type="button" className="rounded-full bg-white px-2 py-2 text-[#1F3FB0]" onClick={()=>confirm(group.eventIds,null)}>解除確認</button>}</>:<><button type="button" aria-pressed={chosen===stop.id} className={`rounded-full px-2 py-2 ${chosen===stop.id?'bg-[#1F3FB0] text-white':'bg-white text-[#1F3FB0]'}`} onClick={()=>choose(group.eventIds,chosen===stop.id?null:stop.id)}>{chosen===stop.id?'取消預覽 · 查看其他選項':'預覽此行程'}</button>{!route&&onConfirm&&chosen===stop.id&&<button type="button" className="block mx-auto rounded-full bg-[#1F3FB0] text-white px-2 py-2" onClick={()=>confirm(group.eventIds,stop.id)}>確認實際前往</button>}</>}</div>}
  </motion.div>})}</AnimatePresence>
  </motion.div>
- {next&&(route&&next.length===1?<div style={{paddingBottom:nodeGap}}>{connector(row,next,i)}</div>:connector(row,next,i))}
+ {next&&(route?(next.length===1?<div style={{paddingBottom:nodeGap}}>{connector(row,next,i)}</div>:connector(row,next,i)):<div data-waybook-route-to={JSON.stringify(next.map(stop=>stop.id))}>{connector(row,next,i)}</div>)}
  </React.Fragment>})}
  </div></div>
  {day.optionalGroups?.some(g=>!g.selectedEventId)&&<p className="text-xs text-center text-[#5E5A52] mt-2">個人預覽不會更改共享行程；實際行程由管理員確認及發佈。</p>}

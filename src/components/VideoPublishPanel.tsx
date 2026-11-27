@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CloudUpload, Loader2 } from 'lucide-react';
 import { compressVideoWhenNeeded } from '../utils/compressVideo';
 import { authorizeDriveVideoUpload, uploadPrivateVideoTest, warmupDriveOAuth } from '../utils/driveVideoPilot';
-import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../utils/driveCloud';
+import { cloudRead, cloudWrite, requireAdminSession } from '../utils/driveCloud';
 import { createVideoPoster, readPendingVideo, savePendingVideo, clearPendingVideo, type PendingVideo } from '../utils/videoUploadReceipt';
 
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -43,6 +43,7 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
     let receipt=selected?null:readPendingVideo(stopId);
     let driveToken='';
     try{
+      const adminSessionToken=requireAdminSession();
       if(selected){
         setStep('準備影片，超過 25 MB 時嘗試在本機壓縮…');
         const duration=await durationOf(selected);
@@ -50,7 +51,9 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
         const clip=output.blob;
         const name=output.wasCompressed ? `${selected.name.replace(/\.[^.]+$/,'')}-720p.${output.extension}` : selected.name;
         setStep('正在上傳影片至 Google Drive…');setProgress(0);
+        requireAdminSession(adminSessionToken);
         driveToken=await authorizeDriveVideoUpload();
+        requireAdminSession(adminSessionToken);
         const uploaded=await uploadPrivateVideoTest(clip,name,driveToken,setProgress);
         // Persist the verified ID before any optional thumbnail or registration work.
         receipt={fileId:uploaded.id,name:uploaded.name,size:Number(uploaded.size)};
@@ -67,7 +70,9 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
       if(!receipt.posterId&&receipt.poster){
         try{
           setStep('正在儲存影片封面…');
+          requireAdminSession(adminSessionToken);
           if(!driveToken) driveToken=await authorizeDriveVideoUpload();
+          requireAdminSession(adminSessionToken);
           const posterBlob=await (await fetch(receipt.poster)).blob();
           if(posterBlob.type!=='image/jpeg'||posterBlob.size>650000) throw Error('Thumbnail too large');
           const result=await uploadPrivateVideoTest(posterBlob,'waybook_video_poster.jpg',driveToken,()=>{});
@@ -79,7 +84,7 @@ export function VideoPublishPanel({stopId}:{stopId:string}) {
       let confirmed=await publishConfirmed(stopId,receipt.fileId);
       if(!confirmed){
         try{
-          const token=await getGoogleIdToken(GOOGLE_CLIENT_ID);
+          const token=requireAdminSession(adminSessionToken);
           const registered = await cloudWrite<{pushQueued?:boolean}>('registerVideo',{stopId,fileId:receipt.fileId,notifyFamily,
             ...(receipt.posterId?{posterId:receipt.posterId}:{}),
             ...(receipt.width&&receipt.height?{width:receipt.width,height:receipt.height}:{})},token);

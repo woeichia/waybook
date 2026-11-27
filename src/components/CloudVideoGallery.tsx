@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Cloud, ExternalLink, Play, X, Loader2, DownloadCloud, Trash2, Maximize2, Minimize2, RotateCw, RotateCcw, Pause, Volume2, VolumeX } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { readCachedPhotos, saveCachedPhoto } from '../utils/cloudCache';
-import { cloudRead, cloudWrite, getGoogleIdToken, GOOGLE_CLIENT_ID } from '../utils/driveCloud';
+import { cloudRead, cloudWrite, requireAdminSession } from '../utils/driveCloud';
 import { getCachedVideo, putCachedVideo } from '../utils/videoCache';
 import { downloadForCache } from '../utils/downloadForCache';
 import { removeCachedWaybookVideo } from '../utils/removeCachedWaybookVideo';
@@ -210,7 +210,7 @@ export function CloudVideoGallery({stopId,readOnly,posterSrc,posterTitle}: {stop
     setDeleteBusy(true);setDeleteError('');
     try {
       // Server rechecks this exact file ID: a newer video must never be removed accidentally.
-      const adminToken=await getGoogleIdToken(GOOGLE_CLIENT_ID);
+      const adminToken=requireAdminSession();
       const result=await cloudWrite<{updatedAt:string;cleanup?:{trashed:number;failed:number;skipped:number}}>(
         'removeVideo',{stopId,expectedFileId:oldId},adminToken);
       stopPlayback();

@@ -1,5 +1,5 @@
 import type { ItineraryData } from '../types/itinerary';
-import { familyRead } from './familyAccess';
+import { familyRead, familyRequest, readFamilySession } from './familyAccess';
 
 /** Public cloud snapshots contain only references to image files, not binary images. */
 export type CloudSnapshot = { version: number; updatedAt: string; itinerary: ItineraryData; galleries: Record<string, string[]>; memoryGalleries?: Record<string, {id:string;caption:string}[]> };
@@ -11,8 +11,33 @@ export function cloudRead<T>(params: Record<string, string>, timeout = 30000): P
   return familyRead<T>(params, timeout);
 }
 
-/** Administrator writes retain the existing receipt fallback and Google ID-token checks. */
+// An admin session is a server-issued, fixed 12-hour credential; memory only.
+export type AdminSession = { token:string; expiresAt:number };
+let activeAdmin:AdminSession|null=null;
+const expiredMessage='管理員登入已過期，請重新登入。';
+export async function startAdminSession(googleToken:string):Promise<AdminSession>{
+  const family=readFamilySession();
+  if(!family)throw Error('家庭登入已過期，請先重新輸入家庭密碼');
+  const result=await familyRequest<AdminSession>('adminLogin',{googleToken,familyToken:family.token},30000);
+  if(!/^wbadmin_[a-f0-9]{64}$/.test(result?.token||'')||!Number.isFinite(result.expiresAt)||result.expiresAt<=Date.now())throw Error('管理員登入回應無效');
+  activeAdmin=result;return result;
+}
+export function clearAdminSession(){activeAdmin=null;}
+export function requireAdminSession(expected?:string):string{
+  if(!activeAdmin||activeAdmin.expiresAt<=Date.now()||(expected&&expected!==activeAdmin.token)){
+    if(activeAdmin&&activeAdmin.expiresAt<=Date.now()){const token=activeAdmin.token;activeAdmin=null;window.dispatchEvent(new CustomEvent('waybook:adminExpired',{detail:{token}}));}
+    throw Error(expiredMessage);
+  }
+  return activeAdmin.token;
+}
+function reportAdminFailure(token:string,message:string){
+  if(token===activeAdmin?.token && /ADMIN_SESSION_(?:EXPIRED|INVALID)/.test(message)){
+    activeAdmin=null;window.dispatchEvent(new CustomEvent('waybook:adminExpired',{detail:{token}}));
+  }
+}
+/** Administrator writes retain the existing receipt fallback, now using server sessions. */
 export function cloudWrite<T>(action: string, data: unknown, idToken: string): Promise<T> {
+  try { requireAdminSession(idToken); } catch(error) { return Promise.reject(error); }
   if (!CLOUD_URL) return Promise.reject(new Error('尚未設定 Apps Script URL'));
   if (!globalThis.crypto?.randomUUID) return Promise.reject(new Error('瀏覽器不支援安全請求識別碼'));
   return new Promise((resolve, reject) => {
@@ -37,7 +62,7 @@ export function cloudWrite<T>(action: string, data: unknown, idToken: string): P
       if (pollTimer !== undefined) window.clearTimeout(pollTimer);
       window.removeEventListener('message', onMessage);
       window.setTimeout(() => { frame.remove(); form.remove(); }, 100);
-      if (error) reject(error); else resolve(response as T);
+      if (error) {reportAdminFailure(idToken,error.message);reject(error);} else resolve(response as T);
     }
     const onMessage = (event: MessageEvent) => {
       if (!/^https:\/\/(?:[a-z0-9-]+\.)*(?:googleusercontent\.com|google\.com)$/i.test(event.origin)) return;

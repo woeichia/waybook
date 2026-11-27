@@ -24,12 +24,22 @@ interface StopDetailSheetProps {
   sourceRect: {x:number;y:number;width:number;height:number}|null;
   onClose: () => void;
   readOnly?: boolean;
+  notificationSection?: 'memory'|'video'|null;
 }
 
-export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onMemorySound, sourceRect, onClose, readOnly = false }) => {
+export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery, memoryPhotos, onSaveMemories, onSaveGallery, onGalleryTick, onMemorySound, sourceRect, onClose, readOnly = false, notificationSection }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const eventHeaderRef = useRef<HTMLDivElement>(null);
+  const memoryAnchor=useRef<HTMLDivElement>(null),videoAnchor=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!stop||!notificationSection)return;
+    const id=window.setTimeout(()=>{
+      const anchor=notificationSection==='memory'?memoryAnchor.current:videoAnchor.current;
+      anchor?.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+    },400);
+    return()=>clearTimeout(id);
+  },[stop?.id,notificationSection]);
   const eventSheetRef = useRef<HTMLDivElement>(null);
   const eventBackdropRef = useRef<HTMLDivElement>(null);
   const suppressClickUntil=useRef(0);
@@ -292,8 +302,10 @@ export const StopDetailSheet: React.FC<StopDetailSheetProps> = ({ stop, gallery,
           <div className="mt-2 flex gap-1.5 text-xs text-[#5E5A52]"><MapPin className="w-3.5 h-3.5 text-[#1F3FB0]"/>{stop.locationName}</div>
           {stop.description && <p className="mt-4 text-sm leading-relaxed text-[#3F3D38]">{stop.description}</p>}
           {stop.transitToNext.trim() && <div className="mt-4 rounded-xl bg-[#EDEBE6] p-3 flex gap-2 text-xs text-[#5E5A52]"><Navigation className="w-4 h-4 text-[#1F3FB0] shrink-0"/>前往下一站：{stop.transitToNext}</div>}
+          <div ref={memoryAnchor} className="scroll-mt-4"/>
           <MemoryGallery stopId={stop.id} photos={memoryPhotos} onSave={onSaveMemories} readOnly={readOnly} onSound={onMemorySound}/>
           {!readOnly && <VideoPublishPanel stopId={stop.id}/>}
+          <div ref={videoAnchor} className="scroll-mt-4"/>
           <CloudVideoGallery stopId={stop.id} readOnly={readOnly} posterSrc={images[0] || undefined} posterTitle={stop.title}/>
           {!readOnly && <VideoPlayerLab/>}
           <div className="mt-5 pt-4 border-t border-black/10 space-y-3">

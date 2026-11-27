@@ -30,6 +30,10 @@ async function bridge(env,op,extra={}) {
 }
 async function main(env=process.env) {
   const kind=env.WAYBOOK_PUSH_KIND;
+  const id=String(env.WAYBOOK_PUSH_UPDATE_ID||'');
+  const updateId=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)&&['content','video'].includes(kind)?id:'';
+  const allowedTypes=['day','event','route','cover','memoryRemoved','added','memory','video','deleted','multiple'];
+  const changeType=updateId&&allowedTypes.includes(env.WAYBOOK_PUSH_CHANGE_TYPE)?env.WAYBOOK_PUSH_CHANGE_TYPE:'';
   if(!allowedKinds.has(kind))throw Error('Invalid notification type');
   const required=['WAYBOOK_APPS_SCRIPT_URL','WAYBOOK_PUSH_BRIDGE_SECRET','VAPID_PUBLIC_KEY','VAPID_PRIVATE_KEY','VAPID_SUBJECT'];
   const missing=required.filter(k=>!env[k]);
@@ -47,7 +51,7 @@ async function main(env=process.env) {
   async function send(device){
     if(!device||!/^[0-9a-f-]{36}$/i.test(device.id||'')||!validSub(device.subscription)){failed++;return;}
     try{
-      await webPush.sendNotification(device.subscription,JSON.stringify({kind}),{TTL:kind==='test'?300:3600,urgency:kind==='test'?'high':'normal',topic:'waybook-'+kind,timeout:10000});
+      await webPush.sendNotification(device.subscription,JSON.stringify({kind,updateId,changeType}),{TTL:kind==='test'?300:3600,urgency:kind==='test'?'high':'normal',...(updateId?{}:{topic:'waybook-'+kind}),timeout:10000});
       accepted++;
     }catch(e){
       if(e.statusCode===404||e.statusCode===410)dead.push({id:device.id,endpoint:device.subscription.endpoint});

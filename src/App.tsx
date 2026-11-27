@@ -6,7 +6,7 @@ import { playUiSound, readSoundEnabled, storeSoundEnabled, type UiSoundKind } fr
 import { CloudPanel } from './components/CloudPanel';
 import { AppUpdateBanner } from './components/AppUpdateBanner';
 import type { RoutePlanResponse } from './utils/routePlanning';
-import { GOOGLE_CLIENT_ID, cloudRead, cloudWrite, getGoogleIdToken, loadCloudPhoto, type CloudSnapshot, hasCloudConfiguration } from './utils/driveCloud';
+import { GOOGLE_CLIENT_ID, cloudRead, cloudWrite, getGoogleIdToken, startAdminSession, clearAdminSession, requireAdminSession, loadCloudPhoto, type CloudSnapshot, hasCloudConfiguration } from './utils/driveCloud';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import { SAMPLE_TRIP } from './data/sampleTrip';
 import type { ItineraryData, ItineraryStop } from './types/itinerary';
@@ -28,6 +28,11 @@ import { StopDetailSheet } from './components/StopDetailSheet';
 import { ShareImportSheet } from './components/ShareImportSheet';
 import { ItineraryEditor } from './components/ItineraryEditor';
 
+type PushChange={dayDate:string;dayNumber:number;eventId:string;type:'day'|'event'|'route'|'cover'|'memoryRemoved'|'added'|'memory'|'video'|'deleted'};
+type PushUpdate={createdAt:number;total:number;items:PushChange[]};
+const readUpdateLink=()=>{const id=new URL(location.href).searchParams.get('wbUpdate')||'';return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)?id:'';};
+const clearUpdateLink=()=>{const url=new URL(location.href);url.searchParams.delete('wbUpdate');history.replaceState(history.state,'',url.href);};
+const pushChangeLabel:Record<PushChange['type'],string>={day:'當日行程已更新',event:'行程已更新',route:'交通資訊已更新',cover:'行程照片已更新',memoryRemoved:'回憶已更新',added:'新增行程',memory:'新增回憶照片',video:'新增回憶影片',deleted:'行程已移除'};
 const TACTILE_EASE = [0.2, 0.8, 0.2, 1] as const;
 
 export default function App() {
@@ -71,6 +76,21 @@ export default function App() {
   const [planPreview, setPlanPreview] = useState<RoutePreview>({});
   const [viewMode, setViewMode] = useState<ItineraryViewMode>('timeline');
   const [selectedStop, setSelectedStop] = useState<ItineraryStop | null>(null);
+  const [noticeId,setNoticeId]=useState(readUpdateLink);
+  const [noticeUpdate,setNoticeUpdate]=useState<PushUpdate|null>(null);
+  const [noticeError,setNoticeError]=useState('');
+  const [noticeArrival,setNoticeArrival]=useState('');
+  const [noticeLoading,setNoticeLoading]=useState(false);
+  const [noticeRetry,setNoticeRetry]=useState(0);
+  const [noticeTarget,setNoticeTarget]=useState<{change:PushChange;stopId:string;dayIndex:number;key:number}|null>(null);
+  const [notificationSection,setNotificationSection]=useState<'memory'|'video'|null>(null);
+  const noticeInFlight=React.useRef(false);
+  const noticeIdRef=React.useRef(noticeId);noticeIdRef.current=noticeId;
+  useEffect(()=>{
+    const onLink=()=>{setNoticeUpdate(null);setNoticeError('');setNoticeArrival('');setNoticeTarget(null);setNoticeId(readUpdateLink());setNoticeRetry(x=>x+1);};
+    window.addEventListener('waybook:updateLink',onLink);
+    return()=>window.removeEventListener('waybook:updateLink',onLink);
+  },[]);
   const selectedSourceRef = React.useRef<{x:number;y:number;width:number;height:number}|null>(null);
   const selectedStopRef = React.useRef<ItineraryStop | null>(null);
   const openPostcard = (stop: ItineraryStop, rect: DOMRect) => {
@@ -82,7 +102,7 @@ export default function App() {
   };
   const closePostcard = () => {
     selectedStopRef.current = null;
-    setSelectedStop(null);
+    setSelectedStop(null);setNotificationSection(null);
   };
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -96,7 +116,9 @@ export default function App() {
   const [cloudPhotoIds, setCloudPhotoIds] = useState<Record<string, string[]>>({});
   const [cloudPhotoData, setCloudPhotoData] = useState<Record<string, string>>({});
   const [adminToken, setAdminToken] = useState('');
-  const isAdmin = !cloudConfigured || !!adminToken;
+  const [adminExpiresAt,setAdminExpiresAt]=useState(0);
+  const [adminNotice,setAdminNotice]=useState('');
+  const isAdmin = !cloudConfigured || (!!adminToken && adminExpiresAt>Date.now());
   const [cloudLoaded, setCloudLoaded] = useState(false);
   // Preserve admin edits while checking for newly published family updates.
   const unpublishedEditsRef = React.useRef(false);
@@ -104,8 +126,31 @@ export default function App() {
   const photoCacheRef = React.useRef<Record<string, string>>({});
   const lastBackgroundCheckRef = React.useRef(0);
   const cloudRequestRef = React.useRef(false);
+  const bootReadyRef=React.useRef(false);
   const editedGalleryIdsRef = React.useRef(new Set<string>());
 
+  const expireAdmin = (message='管理員登入已逾時，已自動登出。') => {
+    clearAdminSession();setAdminToken('');setAdminExpiresAt(0);setIsEditOpen(false);setIsShareOpen(false);
+    const notice=message+(unpublishedEditsRef.current?' 未發佈修改暫時保留在此頁，請重新登入後發佈，勿重新整理或關閉。':'');
+    setAdminNotice(notice);setCloudStatus(notice);
+  };
+  const expireAdminRef=React.useRef(expireAdmin);expireAdminRef.current=expireAdmin;
+  useEffect(()=>{
+    if(!adminToken)return;
+    const check=()=>{if(Date.now()>=adminExpiresAt)expireAdminRef.current();};
+    const reject=(e:Event)=>{if((e as CustomEvent).detail?.token===adminToken)expireAdminRef.current('管理員登入已失效，已自動登出。');};
+    const timer=window.setTimeout(check,Math.max(0,adminExpiresAt-Date.now()));
+    const interval=window.setInterval(check,15000);
+    window.addEventListener('focus',check);window.addEventListener('pageshow',check);
+    document.addEventListener('visibilitychange',check);window.addEventListener('waybook:adminExpired',reject);
+    check();
+    return()=>{clearTimeout(timer);clearInterval(interval);window.removeEventListener('focus',check);window.removeEventListener('pageshow',check);document.removeEventListener('visibilitychange',check);window.removeEventListener('waybook:adminExpired',reject);};
+  },[adminToken,adminExpiresAt]);
+  useEffect(()=>()=>clearAdminSession(),[]);
+  const checkAdminEdit=()=>{
+    if(!cloudConfigured)return true;
+    try{requireAdminSession(adminToken);return Boolean(adminToken);}catch{return false;}
+  };
   const isOnline = useOnlineStatus();
   const { weather, isLoading: weatherLoading, error: weatherError } = useTripWeather(itinerary, isOnline, itinerary.days[selectedDayIndex]?.date);
 
@@ -150,17 +195,19 @@ export default function App() {
   const pullCloud = async (background = false) => {
     // Never replace an administrator's unpublished changes with the published copy.
     if (background && (adminToken || unpublishedEditsRef.current || isEditOpen || selectedStopRef.current || document.hidden)) return;
-    if (!cloudConfigured || cloudRequestRef.current) return;
+    if (!cloudConfigured || cloudRequestRef.current) return false;
+    if (!background && unpublishedEditsRef.current) {setCloudStatus('尚有未發佈修改，請先登入管理員並發佈，避免覆蓋草稿。');return false;}
     cloudRequestRef.current = true;
     if (!background) { setCloudBusy(true); setCloudStatus('正在檢查雲端行程…'); }
     try {
       const snapshot = await cloudRead<CloudSnapshot | null>({action:'snapshot'});
+      if(unpublishedEditsRef.current)return false;
       if (!snapshot) {
         if (!background) {
           setCloudUpdatedAt(''); setCloudPhotoIds({}); setCloudLoaded(true);
           setCloudStatus('雲端尚無行程，管理員可發佈目前台灣行程。');
         }
-        return;
+        return false;
       }
       const memoryRefs = snapshot.memoryGalleries || {};
       const ids = [...new Set([...Object.values(snapshot.galleries || {}).flat(), ...Object.values(memoryRefs).flat().map(item=>item.id)])];
@@ -169,7 +216,7 @@ export default function App() {
       if (sameVersion && missing.length === 0) {
         setCloudLoaded(true);
         if (!background) setCloudStatus('已是最新雲端行程。');
-        return;
+        return true;
       }
       const validated = validateItineraryData(snapshot.itinerary);
       if (!validated.ok) throw new Error(validated.error);
@@ -190,6 +237,7 @@ export default function App() {
         try { Object.assign(photoMap, await readCachedPhotos(missing)); }
         catch { /* Device storage might be disabled; cloud loading still works. */ }
       }
+      if(unpublishedEditsRef.current)return false;
       photoCacheRef.current = photoMap;
       applyCloudPhotos(snapshot.galleries || {}, photoMap, memoryRefs);
       const uncached = ids.filter(id => !photoMap[id]);
@@ -204,15 +252,18 @@ export default function App() {
             void saveCachedPhoto(id, photo).catch(() => {});
           } catch { /* Leave any already cached images untouched. */ }
         }));
+        if(unpublishedEditsRef.current)return false;
         photoCacheRef.current = { ...photoMap };
         applyCloudPhotos(snapshot.galleries || {}, photoMap, memoryRefs);
       }
       if (!background) {
         setCloudStatus(ids.every(id => photoMap[id]) ? '雲端行程及照片已同步。' : '行程已同步，部分照片未能載入。');
       }
+      return true;
     } catch (error) {
       // Silent background failures must not interrupt or erase the last good copy.
       if (!background) setCloudStatus(error instanceof Error ? error.message : '同步失敗');
+      return false;
     } finally {
       cloudRequestRef.current = false;
       if (!background) setCloudBusy(false);
@@ -241,6 +292,7 @@ export default function App() {
         }
       } catch { /* IndexedDB can be disabled; continue with normal cloud fetch. */ }
       if (active) {
+        bootReadyRef.current=true;
         lastBackgroundCheckRef.current = Date.now();
         // First launch still checks the cloud, silently if a stored copy exists.
         // Keep this request in the foreground when no local copy exists.
@@ -256,10 +308,31 @@ export default function App() {
   // remains a manual fallback. No need to reinstall or redeploy after edits.
   const pullCloudRef = React.useRef(pullCloud);
   pullCloudRef.current = pullCloud;
+  const noticeBlocked=!!adminToken||isEditOpen||isShareOpen||!!selectedStop||unpublishedEditsRef.current;
+  useEffect(()=>{
+    if(!noticeId||noticeBlocked||!cloudConfigured||!isOnline||noticeUpdate||noticeError)return;
+    let active=true;
+    const run=async()=>{
+      if(!active||!bootReadyRef.current||noticeInFlight.current||cloudRequestRef.current||document.hidden)return;
+      noticeInFlight.current=true;setNoticeLoading(true);
+      try{
+        const update=await cloudRead<PushUpdate|null>({action:'pushUpdate',updateId:noticeId});
+        if(!active||noticeIdRef.current!==noticeId||unpublishedEditsRef.current)return;
+        // Wait for the published snapshot before interpreting event IDs.
+        if(!await pullCloudRef.current(false))throw Error('未能同步最新行程，請重試。');
+        if(!active||noticeIdRef.current!==noticeId)return;
+        if(!update||!Array.isArray(update.items)||!update.items.length){setNoticeError('此通知已過期或沒有特定活動，已同步最新行程。');return;}
+        setNoticeUpdate(update);
+      }catch(e){if(active)setNoticeError(e instanceof Error?e.message:'未能讀取通知，請重試。');}
+      finally{noticeInFlight.current=false;setNoticeLoading(false);}
+    };
+    const timer=window.setInterval(()=>void run(),700);void run();
+    return()=>{active=false;clearInterval(timer);};
+  },[noticeId,noticeBlocked,cloudConfigured,isOnline,noticeUpdate,noticeError,noticeRetry]);
   useEffect(() => {
     if (!cloudConfigured || !!adminToken || isEditOpen || !isOnline) return;
     const check = () => {
-      if (document.hidden || unpublishedEditsRef.current || selectedStopRef.current) return;
+      if (document.hidden || unpublishedEditsRef.current || selectedStopRef.current || noticeIdRef.current) return;
       const now = Date.now();
       if (now - lastBackgroundCheckRef.current < 15000) return;
       lastBackgroundCheckRef.current = now;
@@ -291,9 +364,10 @@ export default function App() {
 
   const loginAdmin = async () => {
     try {
-      const token = await getGoogleIdToken(GOOGLE_CLIENT_ID);
-      // The Apps Script server verifies this token and checks the admin email for every write.
-      setAdminToken(token); setCloudStatus('已取得 Google 登入憑證，發佈時將由伺服器驗證管理員權限。');
+      const googleToken = await getGoogleIdToken(GOOGLE_CLIENT_ID);
+      const session=await startAdminSession(googleToken);
+      setAdminToken(session.token);setAdminExpiresAt(session.expiresAt);setAdminNotice('');
+      setCloudStatus('管理員已登入（有效 12 小時）。');
       // Restore only unpublished memory edits saved locally, not stale published images.
       try {
         const ids: string[] = JSON.parse(localStorage.getItem(pendingMemoryKey) || '[]');
@@ -312,8 +386,13 @@ export default function App() {
     } catch (error) { setCloudStatus(error instanceof Error ? error.message : '登入失敗'); }
   };
 
+  const logoutAdmin=()=>{
+    const token=adminToken;
+    if(token)void cloudWrite('adminLogout',{},token).catch(()=>{});
+    expireAdmin('已登出管理員。');
+  };
   const publishCloud = async (notifyFamily = false) => {
-    if (!cloudConfigured || !adminToken || cloudBusy || !cloudLoaded) return;
+    if (!cloudConfigured || !adminToken || cloudBusy || !cloudLoaded || !checkAdminEdit()) return;
     if (!window.confirm('發佈後家人的手機將看到這份行程和相片。確定發佈？')) return;
     setCloudBusy(true);
     try {
@@ -393,7 +472,7 @@ export default function App() {
   };
 
   const handleSaveMemories = async (stopId: string, items: MemoryPhoto[]) => {
-    if (!isAdmin) throw new Error('只有管理員可以修改回憶');
+    if (!checkAdminEdit()) throw new Error('請重新登入管理員後修改回憶');
     if (items.length > 12) throw new Error('每個活動最多 12 張回憶照片');
     // Save locally first so a failed upload cannot lose a draft.
     await writeMemories(stopId, items);
@@ -404,6 +483,7 @@ export default function App() {
   };
 
   const handleCopyEventPhotos = (sourceId: string, newId: string) => {
+    if(!checkAdminEdit())return;
     const originals = photoGalleries[sourceId] || [];
     const refs = cloudPhotoIds[sourceId] || [];
     const memoryItems = memoryGalleries[sourceId] || [];
@@ -422,7 +502,7 @@ export default function App() {
     unpublishedEditsRef.current = true;
   };
   const handleSaveGallery = async (stopId: string, photos: string[]) => {
-    if (!isAdmin) throw new Error('只有管理員可以修改照片');
+    if (!checkAdminEdit()) throw new Error('請重新登入管理員後修改照片');
     unpublishedEditsRef.current = true;
     editedGalleryIdsRef.current.add(stopId);
     await writeGallery(stopId, photos);
@@ -430,7 +510,7 @@ export default function App() {
   };
 
   const handleApplyItinerary = (nextData: ItineraryData, backupGalleryRefs?: Record<string,string[]>, backupMemoryRefs?: Record<string,{id:string;caption:string}[]>) => {
-    if (!isAdmin) { setCloudStatus('請先以管理員身分登入後再匯入行程。'); return; }
+    if (!checkAdminEdit()) { setCloudStatus('請先以管理員身分登入後再匯入行程。'); return; }
     unpublishedEditsRef.current = true;
     if (backupGalleryRefs) {
       // Restore references for events with no current media; never replace working
@@ -498,6 +578,50 @@ export default function App() {
     window.history.pushState({waybookNav:true,day:next,layer:'day'},'',window.location.href);
     handleSelectDay(next);
   };
+  const dismissNotice=()=>{clearUpdateLink();setNoticeId('');setNoticeUpdate(null);setNoticeError('');setNoticeArrival('');};
+  const goNotice=(change:PushChange)=>{
+    if(noticeBlocked)return;
+    const actualIndex=change.eventId&&change.type!=='deleted'?itinerary.days.findIndex(d=>d.stops.some(st=>st.id===change.eventId)):-1;
+    const fallbackIndex=itinerary.days.findIndex(d=>d.date===change.dayDate);
+    const index=actualIndex>=0?actualIndex:fallbackIndex>=0?fallbackIndex:Math.max(0,itinerary.days.findIndex(d=>d.dayNumber===change.dayNumber));
+    const day=itinerary.days[index];if(!day){dismissNotice();return;}
+    const eventId=actualIndex>=0?change.eventId:'';
+    const group=day.optionalGroups?.find(g=>g.eventIds.includes(eventId));
+    // Reveal a previously unselected option in the original plan, without editing confirmations.
+    if(group?.selectedEventId&&group.selectedEventId!==eventId){setJourneyView('plan');setPlanPreview({});}
+    else{setJourneyView('actual');setRoutePreview({});}
+    setViewMode('timeline');handleSelectDay(index);
+    window.history.replaceState({waybookNav:true,day:index,layer:'day'},'',window.location.href);
+    setNoticeArrival('');setNoticeTarget({change,stopId:eventId,dayIndex:index,key:Date.now()});
+    clearUpdateLink();setNoticeId('');setNoticeError('');
+    if(noticeUpdate?.total===1)setNoticeUpdate(null); // Keep multi-event summary for the remaining updates.
+  };
+  useEffect(()=>{if(noticeUpdate?.items.length===1&&noticeUpdate.total===1&&!noticeBlocked)goNotice(noticeUpdate.items[0]);},[noticeUpdate,noticeBlocked]);
+  useEffect(()=>{
+    if(!noticeTarget)return;
+    if(selectedDayIndex!==noticeTarget.dayIndex||viewMode!=='timeline'){setNoticeTarget(null);return;}
+    const target=noticeTarget;let cancelled=false;let animation:Animation|undefined;let timer=0;
+    const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const findCard=()=>Array.from(document.querySelectorAll<HTMLElement>('[data-waybook-stop-id]')).find(el=>el.dataset.waybookStopId===target.stopId);
+    const findRoute=()=>Array.from(document.querySelectorAll<HTMLElement>('[data-waybook-route-to]')).find(el=>{try{return JSON.parse(el.dataset.waybookRouteTo||'[]').includes(target.stopId);}catch{return false;}});
+    const run=()=>{
+      if(cancelled)return;
+      const card=findCard(),element=target.change.type==='route'?(findRoute()||card):card;
+      if(!element){window.scrollTo({top:0,behavior:reduced?'auto':'smooth'});setContentNotice(true);setNoticeArrival(target.change.type==='deleted'?'有一項行程已移除。':target.change.type==='day'?'當日行程已更新。':'此活動已變更或移除，已前往相關日期。');setNoticeTarget(null);return;}
+      element.scrollIntoView({block:'center',behavior:reduced?'auto':'smooth'});
+      if(target.change.type==='memory'||target.change.type==='video'){
+        timer=window.setTimeout(()=>{if(cancelled||selectedStopRef.current){setNoticeTarget(null);return;}const c=findCard(),st=itinerary.days[target.dayIndex]?.stops.find(x=>x.id===target.stopId);if(c&&st){setNotificationSection(target.change.type==='memory'?'memory':'video');openPostcard(st,c.getBoundingClientRect());}else setNoticeArrival('此活動已變更，請查看最新行程。');setNoticeTarget(null);},reduced?50:450);
+      }else{
+        const gold={outline:'2px solid rgba(195,164,93,0.95)',outlineOffset:'3px'};
+        animation=element.animate(reduced?[gold,gold]:[gold,{...gold,offset:.8},{...gold,outline:'2px solid rgba(195,164,93,0)'}],{duration:5000,easing:'ease-out'});
+        setNoticeArrival(pushChangeLabel[target.change.type]||'行程已更新');
+        timer=window.setTimeout(()=>{setNoticeTarget(null);setNoticeArrival('');},5000);
+      }
+    };
+    // Let the existing day transition finish before measuring the event card.
+    timer=window.setTimeout(run,reduced?60:450);
+    return()=>{cancelled=true;clearTimeout(timer);animation?.cancel();};
+  },[noticeTarget,selectedDayIndex,viewMode]);
   const activeDay = itinerary.days[selectedDayIndex] ?? itinerary.days[0];
   // A read-only projection of the saved plan: do not modify persisted confirmations.
   const displayDay = activeDay && journeyView==='plan' ? {...activeDay,optionalGroups:activeDay.optionalGroups?.map(g=>({...g,selectedEventId:null}))} : activeDay;
@@ -508,7 +632,7 @@ export default function App() {
     (journeyView==='plan'?setPlanPreview:setRoutePreview)(old=>{const next={...old}; if(id)next[key]=id;else delete next[key];return next;});
   };
   const confirmChoice = (ids:[string,string],id:string|null) => {
-    if(journeyView==='plan' || !isAdmin || !activeDay || (id!==null&&!ids.includes(id))) return;
+    if(journeyView==='plan' || !checkAdminEdit() || !activeDay || (id!==null&&!ids.includes(id))) return;
     if(!window.confirm(id?'確認實際前往此行程？請發佈以同步給家人。':'解除已確認行程？請發佈以同步給家人。')) return;
     const key=groupKey(activeDay,ids);
     setRoutePreview(old=>{const next={...old};delete next[key];return next;});
@@ -522,6 +646,7 @@ export default function App() {
       <div className="min-h-screen bg-[#EDEBE6] sm:py-6 sm:px-4">
         <PaperGrainOverlay />
 
+        {adminNotice && <div role="alert" className="fixed top-2 left-1/2 -translate-x-1/2 z-[100] w-[min(92vw,460px)] rounded-xl bg-[#F4F2ED] shadow-lg ring-1 ring-black/10 p-3 text-xs text-[#5E5A52] flex items-start gap-2"><span className="flex-1">{adminNotice}</span><button type="button" aria-label="關閉提醒" onClick={()=>setAdminNotice('')}>✕</button></div>}
         {photoStorageError && <div className="p-3 bg-amber-100 text-amber-900 text-xs text-center">{photoStorageError}</div>}
         {quotaExceeded && (
           <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
@@ -563,9 +688,17 @@ export default function App() {
               onOpenShareImport={() => setIsShareOpen(true)}
             />
 
-            <AppUpdateBanner blocked={!!selectedStop || isEditOpen || isShareOpen || cloudBusy || (!!adminToken && unpublishedEditsRef.current)} canUpdate={()=>!selectedStopRef.current && !isEditOpen && !isShareOpen && !cloudBusy && !unpublishedEditsRef.current}/>
+            <AppUpdateBanner blocked={!!selectedStop || isEditOpen || isShareOpen || cloudBusy || unpublishedEditsRef.current} canUpdate={()=>!selectedStopRef.current && !isEditOpen && !isShareOpen && !cloudBusy && !unpublishedEditsRef.current}/>
             {!isAdmin && contentNotice && <div role="status" className="mb-2 flex items-center justify-between gap-2 rounded-xl bg-[#F4F2ED] px-3 py-2 text-xs text-[#1F3FB0]">旅程資料已有更新。<button type="button" className="px-2 py-1" onClick={()=>setContentNotice(false)}>關閉</button></div>}
-            <CloudPanel adminToken={adminToken} connected={cloudConfigured} isAdmin={!!adminToken} status={cloudStatus} updatedAt={cloudUpdatedAt} busy={cloudBusy} onLogin={loginAdmin} onLoad={pullCloud} onPublish={publishCloud} />
+            {(noticeId||noticeError||noticeUpdate||noticeArrival)&&<section role="status" className="mb-3 rounded-xl bg-[#F4F2ED] ring-1 ring-black/10 p-3 text-xs text-[#5E5A52] space-y-2">
+              <div className="flex items-center justify-between gap-2"><strong className="text-[#1A1A1A] text-sm">最新旅程動態</strong><button type="button" onClick={dismissNotice} aria-label="關閉更新通知">✕</button></div>
+              {noticeArrival&&<p className="text-[#97702C]">{noticeArrival}</p>}
+              {noticeBlocked?<p>請先完成或發佈修改、登出管理員並關閉活動詳情，再查看通知。</p>:noticeLoading?<p>正在同步最新旅程…</p>:noticeError?<><p>{noticeError}</p>{noticeId&&<button type="button" className="rounded-full bg-white px-3 py-2 text-[#1F3FB0]" onClick={()=>{setNoticeError('');setNoticeRetry(x=>x+1);}}>重試</button>}</>:noticeUpdate?<>
+                <p>{noticeUpdate.total>noticeUpdate.items.length?`共 ${noticeUpdate.total} 項更新，顯示前 ${noticeUpdate.items.length} 項。`:`${noticeUpdate.total} 項旅程更新`}</p>
+                {noticeUpdate.items.map((c,i)=>{const day=itinerary.days.find(d=>d.stops.some(st=>st.id===c.eventId))||itinerary.days.find(d=>d.date===c.dayDate);const st=day?.stops.find(st=>st.id===c.eventId);return <button key={i} type="button" onClick={()=>goNotice(c)} className="w-full rounded-lg bg-white/70 px-3 py-2 text-left"><span className="font-medium text-[#1A1A1A]">Day {day?.dayNumber||c.dayNumber} · {st?.title||day?.title||'旅程'}</span><span className="block mt-1">{pushChangeLabel[c.type]||'旅程已更新'}　›</span></button>;})}
+              </>:noticeId?<p>{isOnline?'正在等待最新旅程…':'請連接網路後查看通知。'}</p>:null}
+            </section>}
+            <CloudPanel adminToken={isAdmin?adminToken:''} expiresAt={adminExpiresAt} onLogout={logoutAdmin} connected={cloudConfigured} isAdmin={!!adminToken&&isAdmin} status={cloudStatus} updatedAt={cloudUpdatedAt} busy={cloudBusy} onLogin={loginAdmin} onLoad={pullCloud} onPublish={publishCloud} />
             <div data-sound-scope="days">
             <DaySelector
               days={itinerary.days}
@@ -580,7 +713,7 @@ export default function App() {
                 <Pencil className="w-3.5 h-3.5" /> {isEditOpen ? '關閉編輯' : '編輯行程'}
               </button>
             </div>}
-            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos} onEstimateRoutes={async stops => { if (!adminToken) throw new Error('請先以管理員身分登入'); return cloudWrite<RoutePlanResponse>('routePlan', {stops}, adminToken); }}
+            {isAdmin && isEditOpen && <ItineraryEditor data={itinerary} dayIndex={selectedDayIndex} onChange={data => { if(!checkAdminEdit())return; unpublishedEditsRef.current = true; setItinerary(data); }} onCopyEventPhotos={handleCopyEventPhotos} onEstimateRoutes={async stops => { if (!adminToken) throw new Error('請先以管理員身分登入'); return cloudWrite<RoutePlanResponse>('routePlan', {stops}, adminToken); }}
                photoEventIds={[...new Set([...Object.keys(cloudPhotoIds).filter(id => cloudPhotoIds[id]?.length), ...Object.keys(photoGalleries).filter(id => photoGalleries[id]?.length), ...Object.keys(cloudMemoryRefs).filter(id=>cloudMemoryRefs[id]?.length), ...Object.keys(memoryGalleries).filter(id=>memoryGalleries[id]?.length)])]}
                onPhoto={async (id, photo) => { try { await handleSaveGallery(id, [photo, ...(photoGalleries[id] ?? []).slice(1)]); return true; } catch { return false; } }} onClose={() => setIsEditOpen(false)} />}
             {(journeyView==='plan'||itinerary.days.some(day=>day.optionalGroups?.some(g=>g.selectedEventId)))&&<div className="mt-3 mb-2 flex justify-end"><label className="sr-only" htmlFor="journey-view">行程顯示模式</label><select id="journey-view" value={journeyView} onChange={e=>{setJourneyView(e.target.value==='plan'?'plan':'actual');setPlanPreview({});}} className="rounded-full bg-[#F4F2ED] ring-1 ring-black/10 px-3 py-2 text-xs text-[#5E5A52]"><option value="actual">實際旅程</option><option value="plan">原始行程</option></select></div>}
@@ -650,6 +783,7 @@ export default function App() {
           }}
           onMemorySound={(kind: UiSoundKind) => { void playUiSound(kind, soundEnabled); }}
           readOnly={!isAdmin}
+          notificationSection={notificationSection}
           sourceRect={selectedSourceRef.current}
           onClose={closePostcard}
         />
