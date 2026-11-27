@@ -43,6 +43,8 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
   return()=>observer.disconnect();
  });
  const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
+ // Match the normal DayRouteView rail margins (my-1.5 = 6 CSS px).
+ const nodeGap=6, nodeDiameter=28;
  const straightRail=(delay:number,duration:number,top=0)=><DayRouteRail top={top} animated={animated} delay={delay} duration={duration}/>;
  const center=(count:number,index:number)=>count===1?(route?DAY_ROUTE_ANCHOR:width/2):index===0?(width-8)/4:(3*width+8)/4;
  function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
@@ -63,7 +65,7 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
   }
   // Route-only geometry: connector bands live outside the transport content.
   // Their height is independent of wrapped instructions, and no masking is needed.
-  if(route){
+  if(route||!linear){
    const showInfo=items.some(x=>x.modeKeys.length>0||(x.enabled&&(!!x.text||x.duration!=null)));
    if(linear){
     return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative" style={{minHeight:48}}>
@@ -78,7 +80,7 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    const topHeight=row.length===2&&lanes.length===2&&next.length===2?48:26;
    const bottomHeight=26;
    const bandPaths=(a:number[],b:number[],h:number,neutral=false)=>routeBandPaths(a,b,h,junction,neutral);
-   const band=(paths:string[],height:number,phase:number)=><DayRouteStroke height={height} paths={width>0?paths:[]} animated={animated} delay={i*step+.24+phase*.28} duration={.27}/>;
+   const band=(paths:string[],height:number,phase:number)=><DayRouteStroke height={height} paths={width>0?paths:[]} animated={animated} delay={i*step+.24+phase*.28} duration={.27} color={color} strokeWidth={route?1:2}/>;
    // No info: connect directly, with no unnecessary blank transport row.
    if(!showInfo)return <div>{band(bandPaths(source,target,48,row.length===2&&next.length===2),48,0)}</div>;
    return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative flex flex-col">
@@ -111,15 +113,15 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
  <div ref={root}>
  {rows.map((row,i)=>{const next=rows[i+1],group=day.optionalGroups?.find(g=>g.eventIds.includes(row[0].id)),chosen=effective.optionalGroups?.find(g=>g.eventIds.includes(row[0].id))?.selectedEventId;return <React.Fragment key={allRows[i][0].id}>
  <motion.div {...anim(i*step)} layout={reduced?false:"position"} transition={{...anim(i*step).transition,layout:layoutTransition}} className={`relative grid items-stretch gap-2 ${row.length===2?'grid-cols-2':'grid-cols-1'}`}>
- <AnimatePresence initial={false} mode="popLayout">{row.map((stop,j)=>{const faded=inactive(effective,stop.id),confirmed=!!group?.selectedEventId;return <motion.div key={stop.id} layout={!reduced} initial={reduced?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0,transition:{duration:reduced?0:.14}}} transition={{layout:layoutTransition,duration:reduced?0:.2}} className="min-w-0 flex flex-col relative">
- {route&&row.length===1&&next&&straightRail(i*step,.24,28)}
+ <AnimatePresence initial={false} mode="popLayout">{row.map((stop,j)=>{const faded=inactive(effective,stop.id),confirmed=!!group?.selectedEventId;return <motion.div key={stop.id} layout={!reduced} initial={reduced?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0,transition:{duration:reduced?0:.14}}} transition={{layout:layoutTransition,duration:reduced?0:.2}} className="min-w-0 flex flex-col relative" style={route&&row.length===1&&next?{minHeight:nodeDiameter+nodeGap}:undefined}>
+ {route&&row.length===1&&next&&straightRail(i*step,.24,nodeDiameter+nodeGap)}
  <div className={`flex-1 ${route?'':'[&>article]:h-full'} ${faded?'opacity-40':''}`}>
  {route?<div className={`relative ${row.length===2?'flex flex-col items-center text-center gap-1 rounded-xl bg-white/50 p-2 h-full':'flex items-start gap-2.5'}`}><span className="flex shrink-0 w-7 h-7 rounded-full bg-[#1F3FB0] text-white items-center justify-center text-xs font-semibold tabular-nums">{i+1}{row.length===2?(j===0?'A':'B'):''}</span><div className={`min-w-0 flex-1 ${row.length===1?'pr-10':''}`}><div className={`flex flex-wrap items-center gap-1.5 ${row.length===2?'justify-center':''}`}><span className="font-mono text-[11px] font-medium text-[#5E5A52] tabular-nums">{stop.time}</span><CategoryBadge category={stop.category}/></div><h4 className="mt-1 text-[15px] font-semibold text-[#1A1A1A] leading-snug break-words">{stop.title}</h4><p className="mt-0.5 text-xs text-[#5E5A52] break-words">{stop.locationName}</p><a href={buildStopMapsUrl(stop.mapQuery)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${stop.title} in Google Maps`} className={`${row.length===1?'absolute right-0 top-0':'mt-2'} inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded-full bg-[#EDEBE6] text-[#1F3FB0] ring-1 ring-black/[0.06]`}><ArrowUpRight className="w-4 h-4"/></a></div></div>:<StopCard compact={row.length===2} stop={stop} customPhotoUrl={photos?.[stop.id]?.[0]??''} onSelect={onSelect!}/>}
  </div>
  {group&&<div className="text-center text-xs py-2 text-[#5E5A52] space-y-1">{confirmed?<><p>{group.selectedEventId===stop.id?'✓ 已前往':'未前往'}</p>{!route&&onConfirm&&group.selectedEventId===stop.id&&<button type="button" className="rounded-full bg-white px-2 py-2 text-[#1F3FB0]" onClick={()=>confirm(group.eventIds,null)}>解除確認</button>}</>:<><button type="button" aria-pressed={chosen===stop.id} className={`rounded-full px-2 py-2 ${chosen===stop.id?'bg-[#1F3FB0] text-white':'bg-white text-[#1F3FB0]'}`} onClick={()=>choose(group.eventIds,chosen===stop.id?null:stop.id)}>{chosen===stop.id?'取消預覽 · 查看其他選項':'預覽此行程'}</button>{!route&&onConfirm&&chosen===stop.id&&<button type="button" className="block mx-auto rounded-full bg-[#1F3FB0] text-white px-2 py-2" onClick={()=>confirm(group.eventIds,stop.id)}>確認實際前往</button>}</>}</div>}
  </motion.div>})}</AnimatePresence>
  </motion.div>
- {next&&connector(row,next,i)}
+ {next&&(route&&next.length===1?<div style={{paddingBottom:nodeGap}}>{connector(row,next,i)}</div>:connector(row,next,i))}
  </React.Fragment>})}
  </div></div>
  {day.optionalGroups?.some(g=>!g.selectedEventId)&&<p className="text-xs text-center text-[#5E5A52] mt-2">個人預覽不會更改共享行程；實際行程由管理員確認及發佈。</p>}

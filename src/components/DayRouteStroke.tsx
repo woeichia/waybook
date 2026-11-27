@@ -8,8 +8,8 @@ const animation=({animated,delay,duration}:AnimationProps)=>({initial:animated?{
 export function DayRouteRail({top=0,...props}:AnimationProps&{top?:number}) {
  return <div aria-hidden="true" className="absolute pointer-events-none" style={{left:0,right:0,top,bottom:0}}><svg width="100%" height="100%" className="block overflow-visible"><motion.line x1={DAY_ROUTE_ANCHOR} x2={DAY_ROUTE_ANCHOR} y1={0} y2="100%" {...DAY_ROUTE_STROKE} {...animation(props)}/></svg></div>;
 }
-export function DayRouteStroke({height,paths,...props}:AnimationProps&{height:number;paths:string[]}) {
- return <svg width="100%" height={height} style={{height}} className="block w-full shrink-0 overflow-visible pointer-events-none" aria-hidden="true">{paths.map((d,k)=><motion.path key={k} d={d} {...DAY_ROUTE_STROKE} {...animation(props)}/>)}</svg>;
+export function DayRouteStroke({height,paths,color=DAY_ROUTE_STROKE.stroke,strokeWidth=DAY_ROUTE_STROKE.strokeWidth,...props}:AnimationProps&{height:number;paths:string[];color?:string;strokeWidth?:number}) {
+ return <svg width="100%" height={height} style={{height}} className="block w-full shrink-0 overflow-visible pointer-events-none" aria-hidden="true">{paths.map((d,k)=><motion.path key={k} d={d} {...DAY_ROUTE_STROKE} stroke={color} strokeWidth={strokeWidth} {...animation(props)}/>)}</svg>;
 }
 // Build a tree with one trunk and one horizontal bus, without duplicated strokes.
 // Branches use clean T-junctions; single-lane elbows remain rounded.
