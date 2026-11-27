@@ -42,6 +42,8 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
   return()=>observer.disconnect();
  });
  const anim=(delay:number)=>({initial:animated?{opacity:0}:false,animate:{opacity:1},transition:{duration:animated?.24:0,delay:animated?delay:0}});
+ // Use the same CSS rail for every straight Day Route segment, avoiding SVG/CSS seams.
+ const straightRail=(delay:number,duration:number,top=0)=><motion.div aria-hidden="true" className="absolute pointer-events-none" style={{left:13.25,width:1.5,top,bottom:0,background:'#1F3FB0',transformOrigin:'top center'}} initial={animated?{scaleY:0}:false} animate={{scaleY:1}} transition={{duration:animated?duration:0,delay:animated?delay:0,ease:'linear'}}/>;
  const center=(count:number,index:number)=>count===1?(route?14:width/2):index===0?(width-8)/4:(3*width+8)/4;
  function connector(row:ItineraryStop[],next:ItineraryStop[],i:number){
   const linear=row.length===1&&next.length===1, junction=width/2;
@@ -63,6 +65,14 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
   // Their height is independent of wrapped instructions, and no masking is needed.
   if(route){
    const showInfo=items.some(x=>x.modeKeys.length>0||(x.enabled&&(!!x.text||x.duration!=null)));
+   if(linear){
+    return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative" style={{minHeight:48}}>
+     {straightRail(i*step+.24,.55)}
+     {showInfo&&<motion.div {...anim(i*step+.4)} className="relative w-full pl-10 py-[26px] text-center">
+      {items.map(item=><TransportDisclosure key={item.key} text={item.text} modeKeys={item.modeKeys} enabled={item.enabled} duration={item.enabled?item.duration:undefined}/>)}
+     </motion.div>}
+    </motion.div>;
+   }
    const source=row.map((_,j)=>center(row.length,j)), target=next.map((_,j)=>center(next.length,j));
    const lanes=linear?[14]:shared?[junction]:next.length===2?target:source;
    const topHeight=row.length===2&&lanes.length===2&&next.length===2?48:26;
@@ -86,7 +96,6 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative flex flex-col">
     {band(bandPaths(source,lanes,topHeight,row.length===2&&next.length===2&&lanes.length===2),topHeight,0)}
     <div className="relative">
-     {linear&&<div aria-hidden="true" className="absolute top-0 bottom-0 pointer-events-none" style={{left:13.25,width:1.5,background:color}}/>}
      <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 items-stretch ${!shared&&pairs.length===2?'grid-cols-2':'grid-cols-1'} ${linear?'pl-10':''}`}>
       {shared?<TransportDisclosure text="" modeKeys={items[0].modeKeys} enabled={false}/>:instructions.map((entries,j)=><div key={j} className="min-w-0 flex flex-col justify-center text-center">
        {entries.map(item=><TransportDisclosure key={item.key} text={item.text} modeKeys={item.modeKeys} enabled={item.enabled} duration={item.enabled?item.duration:undefined} from={pairs[j].length>1?item.from:undefined}/>)}
@@ -115,7 +124,7 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
  {rows.map((row,i)=>{const next=rows[i+1],group=day.optionalGroups?.find(g=>g.eventIds.includes(row[0].id)),chosen=effective.optionalGroups?.find(g=>g.eventIds.includes(row[0].id))?.selectedEventId;return <React.Fragment key={allRows[i][0].id}>
  <motion.div {...anim(i*step)} layout={reduced?false:"position"} transition={{...anim(i*step).transition,layout:layoutTransition}} className={`relative grid items-stretch gap-2 ${row.length===2?'grid-cols-2':'grid-cols-1'}`}>
  <AnimatePresence initial={false} mode="popLayout">{row.map((stop,j)=>{const faded=inactive(effective,stop.id),confirmed=!!group?.selectedEventId;return <motion.div key={stop.id} layout={!reduced} initial={reduced?false:{opacity:0}} animate={{opacity:1}} exit={{opacity:0,transition:{duration:reduced?0:.14}}} transition={{layout:layoutTransition,duration:reduced?0:.2}} className="min-w-0 flex flex-col relative">
- {route&&row.length===1&&next&&<svg aria-hidden="true" className="absolute top-7 -bottom-px overflow-visible pointer-events-none" style={{left:12,width:4,height:'calc(100% - 27px)'}} viewBox="0 0 4 100" preserveAspectRatio="none"><motion.path d="M2 0 V100" fill="none" stroke="#1F3FB0" strokeWidth="1.5" vectorEffect="non-scaling-stroke" strokeLinecap="round" initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?.24:0,delay:animated?i*step:0,ease:'linear'}}/></svg>}
+ {route&&row.length===1&&next&&straightRail(i*step,.24,28)}
  <div className={`flex-1 ${route?'':'[&>article]:h-full'} ${faded?'opacity-40':''}`}>
  {route?<div className={`relative ${row.length===2?'flex flex-col items-center text-center gap-1 rounded-xl bg-white/50 p-2 h-full':'flex items-start gap-2.5'}`}><span className="flex shrink-0 w-7 h-7 rounded-full bg-[#1F3FB0] text-white items-center justify-center text-xs font-semibold tabular-nums">{i+1}{row.length===2?(j===0?'A':'B'):''}</span><div className={`min-w-0 flex-1 ${row.length===1?'pr-10':''}`}><div className={`flex flex-wrap items-center gap-1.5 ${row.length===2?'justify-center':''}`}><span className="font-mono text-[11px] font-medium text-[#5E5A52] tabular-nums">{stop.time}</span><CategoryBadge category={stop.category}/></div><h4 className="mt-1 text-[15px] font-semibold text-[#1A1A1A] leading-snug break-words">{stop.title}</h4><p className="mt-0.5 text-xs text-[#5E5A52] break-words">{stop.locationName}</p><a href={buildStopMapsUrl(stop.mapQuery)} target="_blank" rel="noopener noreferrer" aria-label={`Open ${stop.title} in Google Maps`} className={`${row.length===1?'absolute right-0 top-0':'mt-2'} inline-flex min-h-[32px] min-w-[32px] items-center justify-center rounded-full bg-[#EDEBE6] text-[#1F3FB0] ring-1 ring-black/[0.06]`}><ArrowUpRight className="w-4 h-4"/></a></div></div>:<StopCard compact={row.length===2} stop={stop} customPhotoUrl={photos?.[stop.id]?.[0]??''} onSelect={onSelect!}/>}
  </div>
