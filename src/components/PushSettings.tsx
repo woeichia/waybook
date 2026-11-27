@@ -142,6 +142,7 @@ export function PushSettings({adminToken}:{adminToken:string}) {
     <button type="button" aria-label="通知設定" aria-expanded={open} onClick={()=>{if(supported)setPermission(Notification.permission);setOpen(v=>!v);}} className="min-h-[44px] min-w-[44px] rounded-full inline-flex items-center justify-center bg-[#F4F2ED] ring-1 ring-black/10 text-[#5E5A52]">{enabled?<BellRing className="w-4 h-4 text-[#1F3FB0]"/>:<Bell className="w-4 h-4"/>}</button>
     {open&&<><div className="fixed inset-0 z-[59] bg-black/25" onClick={()=>setOpen(false)}/><div role="dialog" aria-label="通知設定" className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] w-[min(320px,88vw)] rounded-2xl bg-[#F4F2ED] p-4 shadow-lg ring-1 ring-black/10 text-left space-y-2">
       <div className="flex items-center justify-between"><b className="text-sm">通知設定</b><button type="button" aria-label="關閉通知設定" onClick={()=>setOpen(false)} className="p-2 text-xs">✕</button></div>
+      <p className="text-[10px] text-[#5E5A52]">Waybook V4.8.4{import.meta.env.VITE_WAYBOOK_BUILD_ID?` · ${String(import.meta.env.VITE_WAYBOOK_BUILD_ID).slice(0,7)}`:' · local'}</p>
       <p className="text-xs text-[#5E5A52]">此裝置接收行程、回憶及 App 更新通知。App 鎖定時仍可收到不含私人內容的通知。</p>
       {!key?<p className="text-xs">推播尚未設定。</p>:ios&&!standalone?<p className="text-xs">iPhone 請先加入主畫面，再從 App 圖示開啟（iOS 16.4 以上）。</p>:!supported?<p className="text-xs">此瀏覽器不支援 Web Push。</p>:!ready?<p className="text-xs">正在等待 App 服務啟用，請稍後重開。</p>:<>
         <p className="text-xs font-medium">{enabled?'已啟用通知':'尚未啟用通知'}</p>

@@ -1,9 +1,15 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {RefreshCw} from 'lucide-react';
 const buildId=String(import.meta.env.VITE_WAYBOOK_BUILD_ID||'');
+const markerKey='waybook-update-target';
+const delay=(ms:number)=>new Promise<void>(resolve=>window.setTimeout(resolve,ms));
 const versionUrl=new URL(import.meta.env.BASE_URL+'waybook-version.json',window.location.origin);
 export function AppUpdateBanner({blocked,canUpdate}:{blocked:boolean;canUpdate:()=>boolean}){
   const [available,setAvailable]=useState(false);
+  const [verified,setVerified]=useState(()=>{try{return !!buildId && sessionStorage.getItem(markerKey)===buildId;}catch{return false;}});
+  const target=useRef('');
+  const running=useRef(false);
+  useEffect(()=>{if(!verified)return;try{sessionStorage.removeItem(markerKey);}catch{} const timer=window.setTimeout(()=>setVerified(false),5000);return()=>window.clearTimeout(timer);},[verified]);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const lastCheck=useRef(0);
@@ -33,7 +39,7 @@ export function AppUpdateBanner({blocked,canUpdate}:{blocked:boolean;canUpdate:(
         const info=await response.json();
         if(!active)return;
         if(typeof info.build==='string' && /^[a-f0-9]{40}$/i.test(info.build) && info.build!==buildId){
-          setAvailable(true);if(r&&!r.waiting)void r.update().catch(()=>{});
+          target.current=info.build;setAvailable(true);if(r&&!r.waiting)void r.update().catch(()=>{});
         }
         if(r?.waiting)setAvailable(true);
       }catch{/* Network errors must not interrupt Waybook. */}
@@ -47,29 +53,53 @@ export function AppUpdateBanner({blocked,canUpdate}:{blocked:boolean;canUpdate:(
     return()=>{active=false;window.clearInterval(id);watched?.removeEventListener('updatefound',found);installing?.removeEventListener('statechange',stateChanged);navigator.serviceWorker.removeEventListener('controllerchange',onController);navigator.serviceWorker.removeEventListener('message',onPush);document.removeEventListener('visibilitychange',check);window.removeEventListener('focus',check);window.removeEventListener('online',check);};
   },[]);
   const update=async()=>{
-    if(busy||blocked||!canUpdateRef.current())return;
-    setBusy(true);setMessage('');
+    if(running.current||blocked||!canUpdateRef.current())return;
+    running.current=true;setBusy(true);setMessage('正在檢查新版本…');
+    const deadline=Date.now()+120000;
+    const bounded=<T,>(task:Promise<T>):Promise<T>=>new Promise((resolve,reject)=>{
+      const timer=window.setTimeout(()=>reject(Error('更新逾時，請重試或關閉所有 Waybook 視窗再開啟。')),Math.max(0,deadline-Date.now()));
+      task.then(v=>{window.clearTimeout(timer);resolve(v);},e=>{window.clearTimeout(timer);reject(e);});
+    });
     try{
-      const r=await navigator.serviceWorker.getRegistration();
+      const r=await bounded(navigator.serviceWorker.getRegistration());
       if(!r)throw Error('App 服務尚未就緒，請稍後重開。');
-      if(!r.waiting)await r.update();
-      if(!canUpdateRef.current())throw Error('請先儲存變更並關閉活動內容。');
-      if(r.waiting){
-        const waiting=r.waiting;
-        await new Promise<void>((resolve,reject)=>{
-          const cleanup=()=>{window.clearTimeout(timer);waiting.removeEventListener('statechange',change);navigator.serviceWorker.removeEventListener('controllerchange',controller);};
-          const change=()=>{if(waiting.state==='activated'){cleanup();resolve();}else if(waiting.state==='redundant'){cleanup();reject(Error('更新已被取代，請重試。'));}};
-          const controller=()=>{if(navigator.serviceWorker.controller===waiting){cleanup();resolve();}};
-          const timer=window.setTimeout(()=>{cleanup();reject(Error('更新尚未完成，請稍後重試或關閉再開啟。'));},15000);
-          waiting.addEventListener('statechange',change);navigator.serviceWorker.addEventListener('controllerchange',controller);
-          waiting.postMessage({type:'SKIP_WAITING'});change();
-        });
-      }else if(r.installing)throw Error('正在下載新版，請稍後再按更新。');
-      // Reload only on the explicit user action, and never when a draft/detail is open.
-      if(!canUpdateRef.current())throw Error('新版已準備好，請儲存變更後再更新。');
+      const initial=navigator.serviceWorker.controller;
+      const initialActive=r.active;
+      let requested:ServiceWorker|null=null;
+      let nextCheck=0;
+      const safe=()=>{if(!canUpdateRef.current())throw Error('請先儲存變更並關閉活動內容。');};
+      while(Date.now()<deadline){
+        safe();
+        const current=navigator.serviceWorker.controller;
+        // The active/controller object may change before the next polling tick.
+        if(current && current.state==='activated' && (current!==initial || (requested && current===requested)))break;
+        if(r.active && r.active.state==='activated' && r.active!==initialActive && current===r.active)break;
+        if(r.waiting){
+          setMessage('正在啟用新版…');
+          if(requested!==r.waiting){requested=r.waiting;requested.postMessage({type:'SKIP_WAITING'});}
+        }else if(r.installing){setMessage('正在下載新版…');}
+        else if(Date.now()>=nextCheck){
+          setMessage('正在檢查新版本…');nextCheck=Date.now()+10000;
+          // A failed network check is retried within the overall deadline.
+          const checked=await bounded(r.update()).then(()=>true,e=>{if(Date.now()>=deadline)throw e;return false;});
+          if(checked && !r.installing && !r.waiting && target.current && r.active?.state==='activated')break;
+        }
+        await delay(400);
+      }
+      safe();
+      const current=navigator.serviceWorker.controller;
+      const changed=!!current && current.state==='activated' && (current!==initial || current===requested || (r.active!==initialActive && current===r.active));
+      if(!changed){
+        // Another tab or a previous attempt may already have activated the update.
+        // Reload explicitly once, but only when there is no installing/waiting worker.
+        if(r.installing||r.waiting||!target.current)throw Error('更新尚未啟用，請重試或關閉所有 Waybook 視窗再開啟。');
+      }
+      if(target.current)try{sessionStorage.setItem(markerKey,target.current);}catch{}
+      setMessage('正在重新啟動，確認新版…');
       window.location.reload();
-    }catch(e){setMessage(e instanceof Error?e.message:'更新暫未完成');setBusy(false);}
+    }catch(e){setMessage(e instanceof Error?e.message:'更新暫未完成');setBusy(false);running.current=false;}
   };
+  if(verified&&!available)return <p role="status" className="text-xs text-[#35704C] px-3 py-2">已確認新版 App 載入完成。</p>;
   if(!available)return null;
   return <div role="status" className="mt-2 mb-2 rounded-2xl bg-[#F4F2ED] ring-1 ring-black/10 px-3 py-2.5 text-xs text-[#26241F]">
     <div className="flex items-center gap-2"><RefreshCw className="w-4 h-4 shrink-0 text-[#1F3FB0]"/><span className="flex-1">Waybook 有新版本</span><button type="button" disabled={blocked||busy} onClick={()=>void update()} className="rounded-full bg-[#1F3FB0] px-3 py-2 text-white disabled:opacity-50">{busy?'更新中…':'立即更新'}</button></div>
