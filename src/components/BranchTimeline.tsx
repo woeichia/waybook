@@ -59,6 +59,43 @@ export function BranchTimeline({day,photos,onSelect,preview,onPreview,onConfirm,
    lines.push({d:`M${junction} 35 V65`,faded:false,phase:0});
    next.forEach((b,j)=>{const x=center(next.length,j);lines.push({d:`M${junction} 65 Q${junction} 75 ${junction+(x-junction)*.08} 75 H${x+(junction-x)*.08} Q${x} 75 ${x} 85 V100`,faded:inactive(effective,b.id),phase:1});});
   }
+  // Route-only geometry: connector bands live outside the transport content.
+  // Their height is independent of wrapped instructions, and no masking is needed.
+  if(route){
+   const showInfo=items.some(x=>x.modeKeys.length>0||(x.enabled&&(!!x.text||x.duration!=null)));
+   const source=row.map((_,j)=>center(row.length,j)), target=next.map((_,j)=>center(next.length,j));
+   const lanes=linear?[14]:shared?[junction]:next.length===2?target:source;
+   const topHeight=row.length===2&&lanes.length===2&&next.length===2?48:26;
+   const bottomHeight=26;
+   const bend=(a:number,b:number,y:number,h:number)=>{
+    if(Math.abs(a-b)<.5)return `M${a} ${y} V${y+h}`;
+    const r=Math.min(7,Math.abs(a-b)/2,h/4),mid=y+h/2,dir=Math.sign(b-a);
+    return `M${a} ${y} V${mid-r} Q${a} ${mid} ${a+dir*r} ${mid} H${b-dir*r} Q${b} ${mid} ${b} ${mid+r} V${y+h}`;
+   };
+   const bandPaths=(a:number[],b:number[],h:number,neutral=false)=>{
+    if(!neutral&&a.length===b.length&&a.every((x,j)=>Math.abs(x-b[j])<.5))return a.map(x=>bend(x,x,0,h));
+    if(a.length===1&&b.length===1)return [bend(a[0],b[0],0,h)];
+    if(a.length===1)return b.map(x=>bend(a[0],x,0,h));
+    if(b.length===1)return a.map(x=>bend(x,b[0],0,h));
+    // For a 2→2 connection use a neutral junction; never imply matched pairs.
+    return [...a.map(x=>bend(x,junction,0,h/2)),...b.map(x=>bend(junction,x,h/2,h/2))];
+   };
+   const band=(paths:string[],height:number,phase:number)=><svg viewBox={`0 0 ${Math.max(width,1)} ${height}`} preserveAspectRatio="none" className="block w-full shrink-0 overflow-visible pointer-events-none" style={{height}} aria-hidden="true">{width>0&&paths.map((d,k)=><motion.path key={k} d={d} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" initial={animated?{pathLength:0}:false} animate={{pathLength:1}} transition={{duration:animated?.27:0,delay:animated?i*step+.24+phase*.28:0,ease:'linear'}}/>)}</svg>;
+   // No info: connect directly, with no unnecessary blank transport row.
+   if(!showInfo)return <div>{band(bandPaths(source,target,48,row.length===2&&next.length===2),48,0)}</div>;
+   return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className="relative flex flex-col">
+    {band(bandPaths(source,lanes,topHeight,row.length===2&&next.length===2&&lanes.length===2),topHeight,0)}
+    <div className="relative">
+     {linear&&<div aria-hidden="true" className="absolute top-0 bottom-0 pointer-events-none" style={{left:13.25,width:1.5,background:color}}/>}
+     <motion.div {...anim(i*step+.4)} className={`relative w-full grid gap-2 items-stretch ${!shared&&pairs.length===2?'grid-cols-2':'grid-cols-1'} ${linear?'pl-10':''}`}>
+      {shared?<TransportDisclosure text="" modeKeys={items[0].modeKeys} enabled={false}/>:instructions.map((entries,j)=><div key={j} className="min-w-0 flex flex-col justify-center text-center">
+       {entries.map(item=><TransportDisclosure key={item.key} text={item.text} modeKeys={item.modeKeys} enabled={item.enabled} duration={item.enabled?item.duration:undefined} from={pairs[j].length>1?item.from:undefined}/>)}
+      </div>)}
+     </motion.div>
+    </div>
+    {band(bandPaths(lanes,target,bottomHeight),bottomHeight,1)}
+   </motion.div>;
+  }
   return <motion.div layout={reduced?false:"position"} transition={{layout:layoutTransition}} className={`relative flex items-center ${linear?(route?'min-h-[58px]':instructions.some(xs=>xs.length)?'min-h-[40px]':'min-h-[24px]'):'min-h-[100px]'} ${route?'py-2':'py-3'}`}>
    {width>0&&<svg viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" data-transport-connector="" className="absolute inset-0 w-full h-full overflow-visible" aria-hidden="true">
     <defs><mask id={`${maskPrefix}-transport-${i}`} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={-4} y={-4} width={width+8} height={108} style={{maskType:'luminance'}}><rect x={-4} y={-4} width={width+8} height={108} fill="white"/><g data-transport-mask-holes=""/></mask></defs><g mask={`url(#${maskPrefix}-transport-${i})`}>

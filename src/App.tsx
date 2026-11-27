@@ -544,6 +544,7 @@ export default function App() {
               weatherLoading={weatherLoading}
               weatherError={weatherError}
               isOnline={isOnline}
+              showAdminControls={isAdmin}
               soundEnabled={soundEnabled}
               onToggleSound={toggleSound}
               onOpenShareImport={() => setIsShareOpen(true)}
@@ -640,7 +641,7 @@ export default function App() {
 
 
         <ShareImportSheet
-          isOpen={isShareOpen}
+          isOpen={isAdmin && isShareOpen}
           currentTrip={itinerary}
           onClose={() => setIsShareOpen(false)}
           onApplyItinerary={handleApplyItinerary}

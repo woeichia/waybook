@@ -30,6 +30,7 @@ interface TripHeaderProps {
   weatherLoading: boolean;
   weatherError: string | null;
   isOnline: boolean;
+  showAdminControls: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
   onOpenShareImport: () => void;
@@ -56,6 +57,7 @@ export const TripHeader: React.FC<TripHeaderProps> = ({
   weatherLoading,
   weatherError,
   isOnline,
+  showAdminControls,
   soundEnabled,
   onToggleSound,
   onOpenShareImport,
@@ -87,7 +89,7 @@ export const TripHeader: React.FC<TripHeaderProps> = ({
             <PWAInstallButton variant="header" />
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          {showAdminControls && <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               data-sound-control
@@ -117,7 +119,7 @@ export const TripHeader: React.FC<TripHeaderProps> = ({
               <Share2 className="w-3.5 h-3.5 text-[#1F3FB0]" />
               <span>Share / Import</span>
             </button>
-          </div>
+          </div>}
         </div>
 
         <div className="mt-6">

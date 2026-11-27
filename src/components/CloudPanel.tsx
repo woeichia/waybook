@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Cloud, CloudUpload, Download, LockKeyhole, LogIn, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -6,6 +6,14 @@ interface Props {
   busy: boolean; onLogin: () => void; onLoad: () => void; onPublish: () => void;
 }
 export function CloudPanel({connected,isAdmin,status,updatedAt,busy,onLogin,onLoad,onPublish}: Props) {
+  const [showFeedback,setShowFeedback]=useState(false);
+  if(connected&&!isAdmin)return <div className="mt-2 mb-3">
+    <div className="flex items-center justify-end gap-2">
+      <button type="button" disabled={busy} onClick={()=>{setShowFeedback(true);onLoad();}} aria-label="重新載入" className="min-h-[44px] inline-flex items-center gap-1.5 rounded-full bg-[#F4F2ED] px-3 text-xs text-[#5E5A52] ring-1 ring-black/10 disabled:opacity-50"><RefreshCw className={`w-3.5 h-3.5 ${busy?'animate-spin':''}`}/>重新載入</button>
+      <button type="button" disabled={busy} onClick={()=>{setShowFeedback(true);onLogin();}} aria-label="管理員登入" className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center rounded-full bg-[#F4F2ED] text-[#5E5A52] ring-1 ring-black/10 disabled:opacity-50"><LogIn className="w-4 h-4"/></button>
+    </div>
+    {showFeedback&&status&&<p role="status" className="mt-1 text-right text-[11px] text-[#5E5A52] break-words">{status}</p>}
+  </div>;
   return <section className="rounded-2xl bg-[#F4F2ED] ring-1 ring-black/10 p-3.5 mb-3 text-[#26241F]">
     <div className="flex items-center gap-2 text-sm font-bold mb-2"><Cloud className="w-4 h-4"/> Google Drive 同步 {connected ? '· 已設定' : '· 尚未設定'}</div>
     {connected ? <>
